@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from users.enums import DayOfWeek,LeaveStatus
 from decimal import Decimal
+from users.enums import JOB_STATUS_CHOICES
 
 class Department(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -468,3 +469,43 @@ class PerformanceRating(models.Model):
     
     def __str__(self):
         return f"{self.criteria.criteria_name}: {self.rating_value}"
+    
+
+
+class JobPost(models.Model):
+    """
+    Model representing a single job vacancy posted by the HR team.
+    """
+    job_title = models.CharField(max_length=255)
+    job_post = models.CharField(max_length=255, help_text="Short title or designation, e.g., 'Sr. Software Engineer'")
+    description = models.TextField()
+    status = models.CharField(
+        max_length=20,
+        choices=JOB_STATUS_CHOICES,
+        default='DRAFT'
+    )
+    
+    
+    job_publish_date = models.DateField(null=True, blank=True)
+    application_end_date = models.DateField() # Mandatory field
+    
+
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL, 
+        null=True,
+        blank=True,
+        related_name='job_posts'
+    )
+    
+    # Audit fields
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Job Post"
+        verbose_name_plural = "Job Posts"
+        ordering = ['-created_at'] # Latest job post pehle dikhega
+
+    def __str__(self):
+        return f"{self.job_title} ({self.get_status_display()})"
