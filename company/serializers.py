@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
-Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost
+Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
+EmployeeTraining,Award,Notice
 from users.models import User, Profile, Education, Experience
 from users.enums import JobStatus,LeaveStatus
 from django.db.models import Sum
@@ -49,8 +50,6 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     role = serializers.CharField(write_only=True, required=True)
     
-    # FIX: Explicitly define work_shift, monthly_pay_grade, and hourly_pay_grade 
-    # as PrimaryKeyRelatedField for cleaner input validation.
     work_shift = serializers.PrimaryKeyRelatedField(
         queryset=WorkShift.objects.all(), 
         allow_null=True, 
@@ -74,7 +73,7 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
             'date_of_birth', 'gender', 'religion', 'marital_status', 'photo',
             'employee_id', 'department', 'designation', 'branch', 'supervisor',
             'date_of_joining', 'date_of_leaving', 'status', 'monthly_pay_grade',
-            'hourly_pay_grade', 'emergency_contact', 'work_shift' # <-- work_shift field added/ensured
+            'hourly_pay_grade', 'emergency_contact', 'work_shift'
         ]
 
     def create(self, validated_data):
@@ -845,3 +844,80 @@ class JobPostSerializer(serializers.ModelSerializer):
             'published_by', 'published_by_name', 'created_at'
         ]
         read_only_fields = ['id', 'published_by', 'published_by_name', 'created_at']
+
+
+class TrainingTypeSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Training Type CRUD operations.
+    """
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = TrainingType
+        fields = ['id', 'training_type_name', 'status', 'status_display', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class EmployeeTrainingSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Employee Training CRUD operations.
+    Handles nested reading of FK names and file uploads.
+    """
+    
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+
+    training_type_name = serializers.CharField(source='training_type.training_type_name', read_only=True)
+    
+    certificate_file = serializers.FileField(use_url=True, allow_null=True, required=False)
+    class Meta:
+        model = EmployeeTraining
+        fields = [
+            'id',
+            'employee', 'training_type','employee_name', 'training_type_name',
+            'subject', 'from_date', 'to_date', 'description', 
+            'certificate_file', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+
+class AwardSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Award CRUD operations using Enum for Award Name.
+    """
+    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    display_award_name = serializers.CharField(source='get_award_name_display', read_only=True)
+    display_month = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Award
+        fields = [
+            'id', 
+            'award_name', 
+            'employee', 'award_month', 'gift_item',
+            'employee_name', 'display_award_name', 'display_month'
+        ]
+        read_only_fields = ['id']
+
+    def get_display_month(self, obj):
+        # Date ko Month YYYY format mein convert karna
+        return obj.award_month.strftime('%B %Y')
+
+
+
+class NoticeSerializer(serializers.ModelSerializer):
+    """
+    Serializer for Notice CRUD operations.
+    """
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    attach_file = serializers.FileField(use_url=True, allow_null=True, required=False)
+
+    class Meta:
+        model = Notice
+        fields = [
+            'id', 'title', 'description', 'publish_date', 
+            'status', 
+            'status_display',
+            'attach_file', 
+            'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']

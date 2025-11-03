@@ -5,7 +5,9 @@ EmployeeJobStatusUpdateView,HolidayListCreateView,HolidayDetailView,PublicHolida
 LeaveTypeDetailView,EarnLeaveRuleView,ApplyForLeaveView,MyLeaveApplicationsView,AllLeaveApplicationsView,LeaveApprovalView,EmployeeLeaveReportView,MyLeaveReportView,LeaveSummaryReportView, \
 WorkShiftListCreateAPIView,WorkShiftDetailAPIView, ManualAttendanceView,DailyAttendanceReportView,MonthlyAttendanceReportView,MyAttendanceReportView,AttendanceSummaryReportView,AllowanceListCreateView,AllowanceDetailView,\
 MonthlyPayGradeDetailView,MonthlyPayGradeListCreateView,HourlyPayGradeListCreateView,HourlyPayGradeDetailView,DeductionListCreateView,DeductionDetailView,PerformanceCategoryListCreateAPIView,PerformanceCategoryDetailAPIView,\
-PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView
+PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView,\
+TrainingTypeDetailAPIView,TrainingTypeListCreateAPIView,EmployeeTrainingListCreateAPIView,EmployeeTrainingDetailAPIView,EmployeeTrainingReportAPIView,AwardListCreateAPIView,AwardDetailAPIView,NoticeListCreateAPIView,\
+NoticeDetailAPIView
 urlpatterns = [
     # URL for listing and creating departments
     # GET, POST -> /api/company/departments/
@@ -102,7 +104,28 @@ urlpatterns = [
 
     path('job-posts/', JobPostListCreateAPIView.as_view(), name='jobpost-list-create'),
     path('job-posts/<int:pk>/', JobPostDetailAPIView.as_view(), name='jobpost-detail'),
+
+
+    path('training-types/',TrainingTypeListCreateAPIView.as_view(),name='training-type-list-create'),
+    path('training-types/<int:pk>/',TrainingTypeDetailAPIView.as_view(),name='training-type-detail'),
+
+    path('employee-trainings/', EmployeeTrainingListCreateAPIView.as_view(), name='employee-training-list-create'),
+    path('employee-trainings/<int:pk>/', EmployeeTrainingDetailAPIView.as_view(), name='employee-training-detail'),
+
+    path('employee-training-report/', EmployeeTrainingReportAPIView.as_view(),name='employee-training-report'),
+
+
+    path('employee-awards/', AwardListCreateAPIView.as_view(), name='employee-award-list-create'),
+    path('employee-awards/<int:pk>/', AwardDetailAPIView.as_view(), name='employee-award-detail'),
+
+
+    path('notices/', NoticeListCreateAPIView.as_view(), name='notice-list-create'),
+    path('notices/<int:pk>/', NoticeDetailAPIView.as_view(), name='notice-detail'),
 ]
+
+
+
+
 
 
 

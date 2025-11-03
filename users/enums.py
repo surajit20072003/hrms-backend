@@ -27,3 +27,13 @@ JOB_STATUS_CHOICES = [
     ('PUBLISHED', 'Published'),
     ('UNPUBLISHED', 'Unpublished')
 ]
+
+class AwardName(models.TextChoices):
+    EMPLOYEE_OF_THE_MONTH = "EMPLOYEE_OF_THE_MONTH", "Employee of the Month"
+    EMPLOYEE_OF_THE_YEAR = "EMPLOYEE_OF_THE_YEAR", "Employee of the Year"
+    BEST_EMPLOYEE = "BEST_EMPLOYEE", "Best Employee"
+
+class NoticeStatus(models.TextChoices):
+    PUBLISHED = "PUBLISHED", "Published"
+    UNPUBLISHED = "UNPUBLISHED", "Unpublished"
+    

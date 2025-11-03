@@ -15,6 +15,12 @@ class UserSerializer(serializers.ModelSerializer):
 # ==========================
 # Register Serializer
 # ==========================
+from rest_framework import serializers
+from .models import User, Profile # Ensure Profile is imported
+
+# ==========================
+# Register Serializer (FIXED)
+# ==========================
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
@@ -23,10 +29,24 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ['email', 'password', 'first_name', 'last_name']
 
     def create(self, validated_data):
+        # 1. User fields ko separate karein
         password = validated_data.pop('password')
-        user = User.objects.create(**validated_data)
+        first_name = validated_data.pop('first_name', '')
+        last_name = validated_data.pop('last_name', '')
+        email = validated_data.get('email')
+        user = User.objects.create(
+            email=email, 
+            first_name=first_name,
+            last_name=last_name,
+        )
         user.set_password(password)
         user.save()
+        Profile.objects.create(
+            user=user, 
+            first_name=first_name,
+            last_name=last_name
+        )
+        
         return user
 
 

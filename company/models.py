@@ -1,8 +1,8 @@
 from django.db import models
 from django.conf import settings
-from users.enums import DayOfWeek,LeaveStatus
+from users.enums import DayOfWeek,LeaveStatus,Status,NoticeStatus
 from decimal import Decimal
-from users.enums import JOB_STATUS_CHOICES
+from users.enums import JOB_STATUS_CHOICES,AwardName
 
 class Department(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -509,3 +509,143 @@ class JobPost(models.Model):
 
     def __str__(self):
         return f"{self.job_title} ({self.get_status_display()})"
+    
+
+class TrainingType(models.Model):
+    """
+    Model representing different categories of training programs (e.g., Technical, Soft Skills).
+    """
+    training_type_name = models.CharField(max_length=255, unique=True)
+    
+
+    status = models.CharField(
+        max_length=10, 
+        choices=Status.choices, 
+        default=Status.ACTIVE 
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Training Type"
+        verbose_name_plural = "Training Types"
+        ordering = ['training_type_name']
+
+    def __str__(self):
+        return self.training_type_name
+    
+
+class EmployeeTraining(models.Model):
+    """
+    Model to record specific training instances completed by an employee.
+    """
+    # Foreign Keys (Dropdowns from etl02.png)
+    employee = models.ForeignKey(
+        'users.Profile', # Assuming Employee details are in the Profile model
+        on_delete=models.CASCADE,
+        related_name='trainings_attended'
+    )
+    training_type = models.ForeignKey(
+        'TrainingType', 
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='training_instances'
+    )
+    
+    # Text Fields (etl02.png)
+    subject = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
+    
+    # Date Fields (etl02.png)
+    from_date = models.DateField()
+    to_date = models.DateField()
+    
+    # File Upload Field for Certificate (etl02.png)
+    certificate_file = models.FileField(
+        upload_to='training_certificates/',
+        max_length=255,
+        null=True,
+        blank=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Employee Training"
+        verbose_name_plural = "Employee Trainings"
+        unique_together = ('employee', 'subject', 'from_date') 
+        ordering = ['-from_date']
+
+    def __str__(self):
+        return f"{self.employee.full_name} - {self.subject}"
+    
+
+class Award(models.Model):
+    """
+    Model to record awards given to employees (award.png, award02.png).
+    """
+    # Foreign Key
+    employee = models.ForeignKey(
+        'users.Profile', # Employee name dropdown
+        on_delete=models.CASCADE,
+        related_name='awards_received'
+    )
+    
+    # Award Name field uses Enum (TextChoices)
+    award_name = models.CharField(
+        max_length=50, 
+        choices=AwardName.choices, # Enum se choices aayenge
+        verbose_name="Award Name"
+    )
+    gift_item = models.CharField(max_length=255, verbose_name="Gift Item")
+    award_month = models.DateField(verbose_name="Month") 
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Employee Award"
+        verbose_name_plural = "Employee Awards"
+        unique_together = ('employee', 'award_name', 'award_month') 
+        ordering = ['-award_month']
+
+    def __str__(self):
+        # Enum value ko human-readable label mein convert karega
+        return f"{self.employee.full_name} - {self.get_award_name_display()} ({self.award_month.strftime('%B %Y')})"
+    
+class Notice(models.Model):
+    """
+    Model to store official notices and announcements (not01.png, not02.png).
+    """
+    title = models.CharField(max_length=255)
+    description = models.TextField() # Rich text editor content
+    
+    # Status field (Published, Draft, etc.)
+    status = models.CharField(
+        max_length=20, 
+        choices=NoticeStatus.choices, 
+        default=NoticeStatus.PUBLISHED
+    )
+    
+    publish_date = models.DateField(verbose_name="Publish Date")
+    
+    # Optional file attachment field
+    attach_file = models.FileField(
+        upload_to='notices/attachments/', 
+        max_length=255, 
+        null=True, 
+        blank=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Notice"
+        verbose_name_plural = "Notices"
+        ordering = ['-publish_date', '-created_at']
+
+    def __str__(self):
+        return self.title

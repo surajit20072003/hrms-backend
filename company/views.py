@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
 from users.models import Education,Experience,User,Profile
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
-Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost
+Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice
 from .serializers import DepartmentSerializer,DesignationSerializer,EducationSerializer,EmployeeCreateSerializer,ExperienceSerializer,EmployeeListSerializer,EmployeeDetailSerializer
 DepartmentSerializer, DesignationSerializer,
 from django.db.models import Sum
@@ -14,7 +14,7 @@ from .serializers import WarningSerializer,TerminationSerializer,PromotionSerial
 from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplicationListSerializer,LeaveApplicationCreateSerializer,LeaveReportSerializer,WorkShiftSerializer, \
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
-EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer
+EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer
 
 from datetime import date
 from django.db import transaction
@@ -1902,4 +1902,253 @@ class JobPostDetailAPIView(APIView):
         """Delete a job post."""
         job_post = self.get_object(pk)
         job_post.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+
+
+class TrainingTypeListCreateAPIView(APIView):
+    """
+    Handles GET (List) and POST (Create) operations for Training Types using APIView.
+    """
+    # Permission: Sirf authenticated users ko access
+    permission_classes = [IsAdminUser] 
+
+    def get(self, request, format=None):
+        """List all training types ."""
+        # Fetch all records, ordered by name
+        queryset = TrainingType.objects.all().order_by('training_type_name')
+        serializer = TrainingTypeSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, format=None):
+        """Create a new training type """
+        serializer = TrainingTypeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TrainingTypeDetailAPIView(APIView):
+    """
+    Handles GET, PUT, PATCH, and DELETE operations for a single Training Type.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get_object(self, pk):
+        """Helper to safely fetch a TrainingType instance."""
+        return get_object_or_404(TrainingType, pk=pk)
+
+    def get(self, request, pk, format=None):
+        """Retrieve a single training type."""
+        training_type = self.get_object(pk)
+        serializer = TrainingTypeSerializer(training_type)
+        return Response(serializer.data)
+
+    def put(self, request, pk, format=None):
+        """Update a training type (full update)."""
+        training_type = self.get_object(pk)
+        serializer = TrainingTypeSerializer(training_type, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk, format=None):
+        """Delete a training type."""
+        training_type = self.get_object(pk)
+        training_type.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+
+class EmployeeTrainingListCreateAPIView(APIView):
+    """
+    Handles GET (List - etl01.png) and POST (Create - etl02.png) operations for Employee Training.
+    """
+    # Permission: Sirf authenticated users ko access
+    permission_classes = [IsAdminUser] 
+
+    def get(self, request, format=None):
+        """List all employee training records."""
+        queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
+        serializer = EmployeeTrainingSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, format=None):
+        """Create a new employee training record."""
+        serializer = EmployeeTrainingSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EmployeeTrainingDetailAPIView(APIView):
+    """
+    Handles GET, PUT, PATCH, and DELETE operations for a single Employee Training record.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get_object(self, pk):
+        """Helper to safely fetch an EmployeeTraining instance."""
+        # Queryset mein 'employee' aur 'training_type' relationships ko pehle hi fetch karein.
+        return get_object_or_404(EmployeeTraining.objects.select_related('employee', 'training_type'), pk=pk)
+
+    def get(self, request, pk, format=None):
+        """Retrieve a single training record."""
+        training = self.get_object(pk)
+        serializer = EmployeeTrainingSerializer(training)
+        return Response(serializer.data)
+
+    def put(self, request, pk, format=None):
+        """Update a training record (full update)."""
+        training = self.get_object(pk)
+        serializer = EmployeeTrainingSerializer(training, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk, format=None):
+        """Delete a training record."""
+        training = self.get_object(pk)
+        training.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+
+class EmployeeTrainingReportAPIView(APIView):
+    """
+    Handles GET request for the Employee Training Report (emt01.png).
+    Filters training records based on employee ID provided in query parameters.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, format=None):
+        # 1. Query parameter se employee ID lena
+        employee_profile_id = request.query_params.get('employee_id', None)
+
+        # 2. Base Queryset (Optimization ke liye select_related use karein)
+        queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
+
+        # 3. Filtering Logic (Agar employee_id provided hai)
+        if employee_profile_id:
+            # Note: Hamara EmployeeTraining model 'users.Profile' se link hai.
+            # isliye hum 'employee_id' field (Profile model ki primary key) se filter karenge.
+            try:
+                
+                employee_profile_id = int(employee_profile_id) 
+                queryset = queryset.filter(employee__pk=employee_profile_id)
+            except ValueError:
+                # Agar ID invalid ho to 400 Bad Request return karein
+                return Response({"detail": "Invalid employee ID format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = EmployeeTrainingSerializer(queryset, many=True)
+        
+        
+        return Response(serializer.data)
+    
+
+class AwardListCreateAPIView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, format=None):
+        """List all employee awards (award.png)."""
+        # Optimize query by selecting related FKs
+        queryset = Award.objects.select_related('employee').all().order_by('-award_month')
+        serializer = AwardSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, format=None):
+        """Create a new employee award (award02.png)."""
+        serializer = AwardSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AwardDetailAPIView(APIView):
+    permission_classes = [IsAdminUser]
+    
+    def get_object(self, pk):
+        """Helper to safely fetch an Award instance."""
+        # Optimize query by selecting related FKs
+        return get_object_or_404(Award.objects.select_related('employee'), pk=pk)
+
+    def get(self, request, pk, format=None):
+        """Retrieve a single award record."""
+        award = self.get_object(pk)
+        serializer = AwardSerializer(award)
+        return Response(serializer.data)
+
+    def put(self, request, pk, format=None):
+        """Update a training record."""
+        award = self.get_object(pk)
+        serializer = AwardSerializer(award, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk, format=None):
+        """Delete an award record."""
+        award = self.get_object(pk)
+        award.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+class NoticeListCreateAPIView(APIView):
+    """
+    Handles GET (Notice List - not01.png) and POST (Add New Notice - not02.png) operations.
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request, format=None):
+        """List all notices."""
+        queryset = Notice.objects.all().order_by('-publish_date')
+        serializer = NoticeSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, format=None):
+        """Create a new notice."""
+        # Use request.data for standard fields and files
+        serializer = NoticeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save() 
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class NoticeDetailAPIView(APIView):
+    """
+    Handles GET, PUT, PATCH, and DELETE operations for a single Notice record.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get_object(self, pk):
+        """Helper to safely fetch a Notice instance."""
+        return get_object_or_404(Notice, pk=pk)
+
+    def get(self, request, pk, format=None):
+        """Retrieve a single notice record."""
+        notice = self.get_object(pk)
+        serializer = NoticeSerializer(notice)
+        return Response(serializer.data)
+
+    def put(self, request, pk, format=None):
+        """Update a notice record (full update)."""
+        notice = self.get_object(pk)
+        serializer = NoticeSerializer(notice, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk, format=None):
+        """Delete a notice record."""
+        notice = self.get_object(pk)
+        notice.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
