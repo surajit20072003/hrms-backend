@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import UserProfileView, EducationCreateView, ExperienceCreateView
+from .views import *
 
 urlpatterns = [
     # Apni profile dekhne (GET) aur update (PATCH) karne ke liye
@@ -10,4 +10,8 @@ urlpatterns = [
 
     # Naya experience add karne ke liye (POST)
     path('profile/experience/', ExperienceCreateView.as_view(), name='add-experience'),
+
+    path('signup/', RegisterView.as_view(), name='signup'),
+    
+    path('login/', LoginView.as_view(), name='login'),
 ]

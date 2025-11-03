@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -39,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'users',
     'company',
 ]
@@ -129,4 +131,36 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+}
+
+
+# ===========================================================
+# 🔐 SIMPLE JWT SETTINGS
+# ===========================================================
+SIMPLE_JWT = {
+    # Token lifetime durations
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),   # 1 hour
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),      # 7 days
+    'ROTATE_REFRESH_TOKENS': True,                    # Issue new refresh token on every refresh
+    'BLACKLIST_AFTER_ROTATION': True,                 # Old refresh token becomes invalid
+
+    # Token type & header
+    'AUTH_HEADER_TYPES': ('Bearer',),                 # Format: "Authorization: Bearer <token>"
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+
+    # Algorithm & signing
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,                        # Uses Django's SECRET_KEY
+    'VERIFYING_KEY': None,
+
+    # Token claims
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+
+    # Token class
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+
+    # Optional: enable token blacklist (for logout)
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
 }

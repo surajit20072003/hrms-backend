@@ -11,14 +11,38 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "ADMIN", "Admin"
         EMPLOYEE = "EMPLOYEE", "Employee"
-    
-    username = None
+
+    username = None  # remove username field
     email = models.EmailField(unique=True)
-    role = models.CharField(max_length=20, choices=Role.choices, default=Role.EMPLOYEE)
-    
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.EMPLOYEE
+    )
+
+    # ✅ Django's built-in permission fields
+    is_staff = models.BooleanField(default=False)
+    is_superuser = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    date_joined = models.DateTimeField(auto_now_add=True)
+    last_login = models.DateTimeField(auto_now=True)
+
+    # ✅ Configuration
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
+
     objects = UserManager()
+
+    def __str__(self):
+        return self.email
+
+    @property
+    def is_admin(self):
+        return self.role == self.Role.ADMIN
+
+    @property
+    def is_employee(self):
+        return self.role == self.Role.EMPLOYEE
     
 
 
