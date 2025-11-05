@@ -2,7 +2,7 @@ from django.db import models
 from django.conf import settings
 from users.enums import DayOfWeek,LeaveStatus,Status,NoticeStatus
 from decimal import Decimal
-from users.enums import JOB_STATUS_CHOICES,AwardName
+from users.enums import JOB_STATUS_CHOICES,AwardName,SlabChoices,GenderChoices
 
 class Department(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -649,3 +649,88 @@ class Notice(models.Model):
 
     def __str__(self):
         return self.title
+    
+
+
+
+
+class LateDeductionRule(models.Model):
+    """ 
+    Defines the rule for salary deduction based on late attendance days.
+    """
+    
+    late_days_threshold = models.PositiveIntegerField(
+        unique=True, 
+        verbose_name="Late Days Threshold",
+        help_text="Number of late days (within a month) required to trigger deduction."
+    )
+    
+    deduction_days = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        verbose_name="Salary Deduction Days",
+        help_text="Number of salary days to deduct (e.g., 1.0 for one full day)."
+    )
+    
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        verbose_name="Status"
+    )
+    
+    class Meta:
+        ordering = ['late_days_threshold']
+        verbose_name = "Late Deduction Rule"
+        verbose_name_plural = "Late Deduction Rules"
+
+    def __str__(self):
+        return f"{self.late_days_threshold} Late Days -> {self.deduction_days} Day Cut ({self.status})"
+    
+
+from django.db import models
+
+class TaxRule(models.Model):
+
+    # Tax Slab Identification
+    gender = models.CharField(
+        max_length=10, 
+        choices=GenderChoices.choices, 
+        verbose_name="Gender Rule"
+    )
+    
+    slab_type = models.CharField(
+        max_length=20, 
+        choices=SlabChoices.choices, 
+        default=SlabChoices.NEXT,
+        verbose_name="Slab Type"
+    )
+
+    total_income_limit = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        verbose_name="Total Income Limit",
+        help_text="The upper limit of the income slab (e.g., 250000.00)"
+    )
+    tax_rate_percentage = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        verbose_name="Tax Rate %"
+    )
+    taxable_amount_fixed = models.DecimalField(
+        max_digits=15, 
+        decimal_places=2, 
+        default=0.00,
+        verbose_name="Fixed Taxable Amount for Slab"
+    )
+    
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        unique_together = ('gender', 'total_income_limit') 
+        ordering = ['gender', 'total_income_limit']
+        verbose_name = "Tax Rule"
+        verbose_name_plural = "Tax Rules"
+
+    def __str__(self):
+        return f"Tax Rule ({self.gender}): Upto {self.total_income_limit} @ {self.tax_rate_percentage}%"

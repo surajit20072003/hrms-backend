@@ -7,7 +7,7 @@ WorkShiftListCreateAPIView,WorkShiftDetailAPIView, ManualAttendanceView,DailyAtt
 MonthlyPayGradeDetailView,MonthlyPayGradeListCreateView,HourlyPayGradeListCreateView,HourlyPayGradeDetailView,DeductionListCreateView,DeductionDetailView,PerformanceCategoryListCreateAPIView,PerformanceCategoryDetailAPIView,\
 PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView,\
 TrainingTypeDetailAPIView,TrainingTypeListCreateAPIView,EmployeeTrainingListCreateAPIView,EmployeeTrainingDetailAPIView,EmployeeTrainingReportAPIView,AwardListCreateAPIView,AwardDetailAPIView,NoticeListCreateAPIView,\
-NoticeDetailAPIView
+NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView
 urlpatterns = [
     # URL for listing and creating departments
     # GET, POST -> /api/company/departments/
@@ -121,6 +121,17 @@ urlpatterns = [
 
     path('notices/', NoticeListCreateAPIView.as_view(), name='notice-list-create'),
     path('notices/<int:pk>/', NoticeDetailAPIView.as_view(), name='notice-detail'),
+
+
+    path('dashboard-data/', DashboardDataAPIView.as_view(), name='dashboard-data'),
+
+
+    path('setup/late-configuration/',LateDeductionRuleListCreateAPIView.as_view(), name='late-rule-list-create-api'),
+    path('setup/late-configuration/<int:pk>/',LateDeductionRuleRetrieveUpdateDestroyAPIView.as_view(),name='late-rule-crud-api'),\
+    
+    path('setup/tax-rules/', TaxRuleSetupAPIView.as_view(),name='tax-rule-setup'),
+
+
 ]
 
 

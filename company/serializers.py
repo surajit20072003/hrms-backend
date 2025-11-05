@@ -1,9 +1,9 @@
 from rest_framework import serializers
 from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
 Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
-EmployeeTraining,Award,Notice
+EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule
 from users.models import User, Profile, Education, Experience
-from users.enums import JobStatus,LeaveStatus
+from users.enums import JobStatus,LeaveStatus,SlabChoices
 from django.db.models import Sum
 from decimal import Decimal
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -921,3 +921,92 @@ class NoticeSerializer(serializers.ModelSerializer):
             'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class LateDeductionRuleSerializer(serializers.ModelSerializer):
+    """ 
+    Serializer is simple because the 'status' field is already a CharField 
+    with choices matching the frontend strings.
+    """
+    class Meta:
+        model = LateDeductionRule
+        fields = [
+            'id', 
+            'late_days_threshold', 
+            'deduction_days',      
+            'status'               # 'status' field ab seedhe model se aata hai
+        ]
+        read_only_fields = ['id']
+
+
+
+class TaxRuleSerializer(serializers.ModelSerializer):
+    """ 
+    Serializer for Tax Rule Setup, including auto-calculation of 
+    Taxable Amount based on the previous slab limit. 
+    """
+    
+    class Meta:
+        model = TaxRule
+        fields = [
+            'id',
+            'gender',
+            'slab_type',
+            'total_income_limit',
+            'tax_rate_percentage',
+            'taxable_amount_fixed',
+            'is_active',
+        ]
+        read_only_fields = ['id']
+
+    def calculate_fixed_tax(self, gender, current_limit, tax_rate_percent):
+        """ 
+        Calculates the fixed taxable amount for the current slab by querying the previous slab's limit.
+        """
+        
+        # 1. Previous Slab ki limit dhoondhna
+        # Filter: Same gender, aur income limit current limit se kam ho.
+        previous_rules = TaxRule.objects.filter(
+            gender=gender,
+            total_income_limit__lt=current_limit
+        ).order_by('-total_income_limit')
+        
+        previous_limit = Decimal('0.00')
+        if previous_rules.exists():
+            # Pichle sabse bade rule ki limit. Agar 'First' slab hai, to yeh 0 rahega.
+            previous_limit = previous_rules.first().total_income_limit
+        
+        # 2. Calculation
+        taxable_income_in_slab = current_limit - previous_limit
+        
+        # Fixed Tax = (Income in Slab * Tax Rate) / 100
+        fixed_tax = (taxable_income_in_slab * tax_rate_percent) / 100
+        return fixed_tax
+
+    def save_taxable_amount(self, validated_data):
+        """ Calculates Taxable Amount before saving/updating. """
+        
+        current_limit = validated_data.get('total_income_limit')
+        tax_rate = validated_data.get('tax_rate_percentage')
+        gender = validated_data.get('gender')
+        slab_type = validated_data.get('slab_type')
+        
+        # 'Remaining Total Income' slab ke liye, fixed tax 0 hoga.
+        if slab_type == SlabChoices.REMAINING:
+             validated_data['taxable_amount_fixed'] = 0.00
+        else:
+            # Fixed tax calculate karein
+            calculated_tax = self.calculate_fixed_tax(gender, current_limit, tax_rate)
+            validated_data['taxable_amount_fixed'] = calculated_tax
+            
+        return validated_data
+
+    def create(self, validated_data):
+        """ Create method ko override kiya taaki calculation ho sake. """
+        validated_data = self.save_taxable_amount(validated_data)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """ Update method ko override kiya taaki calculation ho sake. """
+        validated_data = self.save_taxable_amount(validated_data)
+        return super().update(instance, validated_data)

@@ -37,3 +37,12 @@ class NoticeStatus(models.TextChoices):
     PUBLISHED = "PUBLISHED", "Published"
     UNPUBLISHED = "UNPUBLISHED", "Unpublished"
     
+
+class GenderChoices(models.TextChoices):
+    MALE = "Male", "Male"
+    FEMALE = "Female", "Female"
+        
+class SlabChoices(models.TextChoices):
+    FIRST = "First", "First"
+    NEXT = "Next", "Next"
+    REMAINING = "Remaining", "Remaining Total Income"

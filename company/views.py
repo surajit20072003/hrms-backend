@@ -5,16 +5,16 @@ from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
 from users.models import Education,Experience,User,Profile
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
-Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice
+Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule
 from .serializers import DepartmentSerializer,DesignationSerializer,EducationSerializer,EmployeeCreateSerializer,ExperienceSerializer,EmployeeListSerializer,EmployeeDetailSerializer
 DepartmentSerializer, DesignationSerializer,
 from django.db.models import Sum
-from users.enums import LeaveStatus
+from users.enums import LeaveStatus,GenderChoices
 from .serializers import WarningSerializer,TerminationSerializer,PromotionSerializer,EmployeeJobStatusSerializer,HolidaySerializer,PublicHolidaySerializer,EarnLeaveRuleSerializer    
 from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplicationListSerializer,LeaveApplicationCreateSerializer,LeaveReportSerializer,WorkShiftSerializer, \
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
-EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer
+EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer
 
 from datetime import date
 from django.db import transaction
@@ -2152,3 +2152,186 @@ class NoticeDetailAPIView(APIView):
         notice = self.get_object(pk)
         notice.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+    
+
+
+class DashboardDataAPIView(APIView):
+    """
+    Provides key metrics (Employee count, Department count, Present/Absent count) 
+    and recent activity data (Notice Board).
+    """
+    permission_classes = [IsAdminUser] 
+
+    def get(self, request, *args, **kwargs):
+        today = date.today()
+        
+        total_employees = User.objects.filter(
+            role=User.Role.EMPLOYEE,             # User model field
+            profile__status='Active',            # Profile model field
+            profile__isnull=False                # Ensure profile exists
+        ).count()
+        
+        # Total Active Departments Count
+        total_departments = Department.objects.count()
+        
+        # Today's Attendance Record
+        today_attendance_records = Attendance.objects.filter(attendance_date=today)
+        
+        # Present Count
+        present_count = today_attendance_records.filter(is_present=True).count()
+        
+        # Absent Count (Total Active Employees - Present Employees)
+        absent_count = total_employees - present_count
+        
+        
+        # --- 2. Today Attendance List (Only Present Employees' Summary) ---
+        
+        attendance_list = []
+        today_present_records = today_attendance_records.filter(is_present=True).select_related('employee__profile')
+
+        for record in today_present_records:
+            profile = record.employee.profile
+            
+            in_time = record.punch_in_time.time().strftime('%I:%M %p') if record.punch_in_time else None
+            out_time = record.punch_out_time.time().strftime('%I:%M %p') if record.punch_out_time else None
+            
+            attendance_list.append({
+                "photo": profile.photo.url if profile.photo else None,
+                "name": profile.full_name,
+                "in_time": in_time,
+                "out_time": out_time,
+                "late_duration": format_duration(record.late_duration), 
+            })
+            
+        latest_notice = Notice.objects.filter(status='PUBLISHED').order_by('-publish_date').first()
+        
+        notice_data = None
+        if latest_notice:
+            notice_data = {
+                'title': latest_notice.title,
+                'publish_date': latest_notice.publish_date.strftime("%d %b %Y"),
+                'description': latest_notice.description,
+            }
+        return Response({
+            'success': True,
+            'metrics': {
+                'total_employee': total_employees,
+                'total_department': total_departments,
+                'present_today': present_count,
+                'absent_today': absent_count,
+            },
+            'today_attendance_list': attendance_list,
+            'notice_board': notice_data,
+        })
+    
+
+
+class LateDeductionRuleListCreateAPIView(APIView):
+    """ Handles listing all rules and creating a new rule. """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        """ Lists all Late Deduction Rules (List Action). """
+        queryset = LateDeductionRule.objects.all().order_by('late_days_threshold')
+        serializer = LateDeductionRuleSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        """ Creates a new Late Deduction Rule (Create Action). """
+        serializer = LateDeductionRuleSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class LateDeductionRuleRetrieveUpdateDestroyAPIView(APIView):
+    """ Handles detail view, update, and delete for a single rule. """
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, pk):
+        return get_object_or_404(LateDeductionRule, pk=pk)
+
+    def get(self, request, pk):
+        """ Retrieves a single rule (Detail Action). """
+        rule = self.get_object(pk)
+        serializer = LateDeductionRuleSerializer(rule)
+        return Response(serializer.data)
+
+    def put(self, request, pk):
+        """ Updates an existing rule completely (Update Action). """
+        rule = self.get_object(pk)
+        serializer = LateDeductionRuleSerializer(rule, data=request.data) 
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        """ Deletes an existing rule (Destroy Action). """
+        rule = self.get_object(pk)
+        rule.delete()
+        return Response({"message": "Rule deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+    
+
+
+class TaxRuleSetupAPIView(APIView):
+    """
+    Handles listing all Tax Rules (GET) and bulk updating/creating (PUT/POST) them.
+    (Corresponds to Tax Rule Setup screen: tax01.png)
+    """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        """ Lists all Tax Rules, grouped by gender. """
+        queryset = TaxRule.objects.all().order_by('gender', 'total_income_limit')
+        
+        # Data ko Gender ke hisaab se group karna
+        male_rules = queryset.filter(gender=GenderChoices.MALE)
+        female_rules = queryset.filter(gender=GenderChoices.FEMALE)
+        
+        male_serializer = TaxRuleSerializer(male_rules, many=True)
+        female_serializer = TaxRuleSerializer(female_rules, many=True)
+        
+        return Response({
+            "male_rules": male_serializer.data,
+            "female_rules": female_serializer.data,
+        })
+
+    def put(self, request):
+        """ Bulk updates/creates Tax Rules based on the list provided. """
+        rules_data = request.data.get('rules', []) # Frontend se list expect kar rahe hain
+        
+        if not isinstance(rules_data, list):
+            return Response({"error": "Expected a list of rules."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ya toh sab save ho, ya kuch nahi
+        with transaction.atomic():
+            results = []
+            errors = []
+            
+            for item in rules_data:
+                rule_id = item.get('id')
+                
+                if rule_id:
+                    # Update existing rule
+                    try:
+                        instance = TaxRule.objects.get(id=rule_id)
+                        serializer = TaxRuleSerializer(instance, data=item)
+                    except TaxRule.DoesNotExist:
+                        errors.append({"id": rule_id, "error": "Rule not found for update."})
+                        continue
+                else:
+                    # Create new rule
+                    serializer = TaxRuleSerializer(data=item)
+
+                if serializer.is_valid():
+                    serializer.save()
+                    results.append(serializer.data)
+                else:
+                    errors.append({"data": item, "errors": serializer.errors})
+            
+            if errors:
+                # Agar koi error ho, toh transaction revert ho jaayega
+                return Response({"message": "Errors occurred during bulk update/create.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+                
+            return Response(results, status=status.HTTP_200_OK)
