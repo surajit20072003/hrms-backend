@@ -11,6 +11,7 @@ class User(AbstractUser):
     class Role(models.TextChoices):
         ADMIN = "ADMIN", "Admin"
         EMPLOYEE = "EMPLOYEE", "Employee"
+        MANAGER = "MANAGER", "Manager"
 
     username = None  # remove username field
     email = models.EmailField(unique=True)
@@ -43,6 +44,10 @@ class User(AbstractUser):
     @property
     def is_employee(self):
         return self.role == self.Role.EMPLOYEE
+    
+    @property
+    def is_manager(self):
+        return self.role == self.Role.MANAGER
     
 
 

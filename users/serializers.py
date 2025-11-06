@@ -13,12 +13,6 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 # ==========================
-# Register Serializer
-# ==========================
-from rest_framework import serializers
-from .models import User, Profile # Ensure Profile is imported
-
-# ==========================
 # Register Serializer (FIXED)
 # ==========================
 class RegisterSerializer(serializers.ModelSerializer):
