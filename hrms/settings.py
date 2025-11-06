@@ -60,10 +60,16 @@ MIDDLEWARE = [
 
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",  # Aapke React/Vite/Frontend ka URL
-    "http://127.0.0.1:5173",  # Agar 127.0.0.1 use hota hai
+    "http://localhost:5173",  
+    "http://127.0.0.1:5173",
+    # Aapka frontend URL
+    "http://hrms.brainticket.com", 
+    
+    "http://localhost:3000",  
+    "http://127.0.0.1:3000"
 ]
 
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'hrms.urls'
 
