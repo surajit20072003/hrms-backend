@@ -180,3 +180,7 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
 }
+USE_TZ = True 
+
+# CRITICAL FIX: Set the Time Zone to your operational time
+TIME_ZONE = 'Asia/Kolkata'

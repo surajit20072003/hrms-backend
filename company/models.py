@@ -206,7 +206,11 @@ class WorkShift(models.Model):
     end_time = models.TimeField(verbose_name="End Time")     # e.g., 18:00:00
     
     # Time after which arrival is considered late
-    late_count_time = models.TimeField(verbose_name="Late Count Time", null=True, blank=True) # e.g., 09:15:00
+    late_count_time = models.TimeField(verbose_name="Late Count Time", null=True, blank=True) 
+    ot_start_delay_minutes = models.PositiveIntegerField(
+        default=60, # Default: 30 minutes grace period
+        verbose_name="OT Start Delay (Minutes)"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -327,9 +331,22 @@ class Deduction(models.Model):
 
 class MonthlyPayGrade(models.Model):
     grade_name = models.CharField(max_length=100, unique=True, verbose_name="Grade Name")
-    gross_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    percentage_of_basic_g = models.DecimalField(max_digits=5, decimal_places=2, default=50.00)
+    
+    # Input Field (Admin sets this value)
     basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    
+    # Calculated Fields (Stored for easy querying/reporting)
+    gross_salary = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0.00,
+        verbose_name="Calculated Gross Salary"
+    )
+    net_salary = models.DecimalField( 
+        max_digits=10, decimal_places=2, default=0.00, 
+        verbose_name="Calculated Net Salary"
+    )
+    
+    # Redundant field removed: percentage_of_basic_g (Ab iski zaroorat nahi)
+    
     overtime_rate = models.DecimalField(max_digits=8, decimal_places=2, default=0.00)
     is_active = models.BooleanField(default=True)
     
@@ -688,7 +705,6 @@ class LateDeductionRule(models.Model):
         return f"{self.late_days_threshold} Late Days -> {self.deduction_days} Day Cut ({self.status})"
     
 
-from django.db import models
 
 class TaxRule(models.Model):
 
@@ -734,3 +750,58 @@ class TaxRule(models.Model):
 
     def __str__(self):
         return f"Tax Rule ({self.gender}): Upto {self.total_income_limit} @ {self.tax_rate_percentage}%"
+    
+
+
+class PaySlip(models.Model):
+    """
+    Ek mahine ke liye employee ki final calculated salary ka summary record.
+    """
+    
+    STATUS_CHOICES = (
+        ('Pending', 'Pending Calculation'),
+        ('Calculated', 'Ready for Payment'),
+        ('Paid', 'Payment Made'),
+    )
+
+    employee = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payslips')
+    payment_month = models.DateField(db_index=True) # E.g., 2025-11-01
+    
+    #--- Financial Summary (Adjusted Values) ---
+    basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Payable Basic Salary (after absence cut)")
+    gross_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Adjusted Gross Salary (after absence cut)")
+    total_allowances = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_deductions = models.DecimalField(max_digits=10, decimal_places=2, default=0) # Sum of all deductions + cuts
+    net_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_overtime_pay = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Total Overtime Pay added to Gross") # <-- NEW FIELD
+    total_tax_deduction = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Total Income Tax / TDS deducted") # <-- NEW FIELD
+    #--- Attendance/Working Summary ---
+    total_days_in_month = models.DecimalField(max_digits=4, decimal_places=1, default=0)
+    working_days = models.DecimalField(max_digits=4, decimal_places=1, default=0, help_text="Total Paid Days (Worked + Paid Leave)")
+    unjustified_absence = models.DecimalField(max_digits=4, decimal_places=1, default=0, help_text="Unpaid leave/Absent days")
+    late_attendance_count = models.PositiveIntegerField(default=0, help_text="Total number of late punch-ins")
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
+    generated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='generated_payslips')
+    
+    class Meta:
+        unique_together = ('employee', 'payment_month')
+        ordering = ['-payment_month']
+
+class PaySlipDetail(models.Model):
+    """
+    Har allowance aur deduction (including Late Cut, PF, Tax, Absence Cut) ka item-wise breakdown store karta hai.
+    """
+    
+    TYPE_CHOICES = (
+        ('Allowance', 'Allowance'),
+        ('Deduction', 'Deduction'),
+    )
+    
+    payslip = models.ForeignKey(PaySlip, on_delete=models.CASCADE, related_name='details')
+    item_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    item_name = models.CharField(max_length=100) # e.g., HRA, PF, Late Attendance Cut, Unjustified Absence Cut
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
+    class Meta:
+        ordering = ['item_type', 'item_name']

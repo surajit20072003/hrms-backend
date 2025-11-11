@@ -5,7 +5,8 @@ from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
 from users.models import Education,Experience,User,Profile
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
-Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule
+Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,\
+PaySlip,PaySlipDetail
 from .serializers import DepartmentSerializer,DesignationSerializer,EducationSerializer,EmployeeCreateSerializer,ExperienceSerializer,EmployeeListSerializer,EmployeeDetailSerializer
 DepartmentSerializer, DesignationSerializer,
 from django.db.models import Sum
@@ -14,7 +15,8 @@ from .serializers import WarningSerializer,TerminationSerializer,PromotionSerial
 from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplicationListSerializer,LeaveApplicationCreateSerializer,LeaveReportSerializer,WorkShiftSerializer, \
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
-EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer
+EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
+PaySlipDetailSerializer,MonthlySalaryFilterSerializer
 
 from datetime import date
 from django.db import transaction
@@ -24,17 +26,34 @@ from datetime import datetime, timedelta, time
 from calendar import monthrange
 from django.utils import timezone
 from django.db.models import Prefetch
+from decimal import Decimal
+from .pagination import StandardResultsSetPagination
 
 class DepartmentListCreateView(APIView):
     """
-    Departments ki list dekhein ya naya department banayein.
+    Departments ki list dekhein (Pagination aur Search ke saath) ya naya department banayein.
     """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        departments = Department.objects.all()
-        serializer = DepartmentSerializer(departments, many=True)
-        return Response(serializer.data)
+        queryset = Department.objects.all().order_by('name')   
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(name__icontains=search_query)
+
+        # 3. Pagination Apply karna
+        paginator = StandardResultsSetPagination()
+        
+        # Queryset ko paginator ko dein
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        # 4. Serialization
+        # Serializer ko sirf current page ke items par apply karein
+        serializer = DepartmentSerializer(page, many=True)
+        
+        # 5. Response mein paginated data return karna
+        # Yeh method metadata (count, next, previous) ke saath data return karta hai
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = DepartmentSerializer(data=request.data)
@@ -90,9 +109,22 @@ class DesignationListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        designations = Designation.objects.all()
-        serializer = DesignationSerializer(designations, many=True)
-        return Response(serializer.data)
+        
+        queryset = Designation.objects.select_related('department').all().order_by('department__name', 'name')
+        
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) 
+            )
+            
+        paginator = StandardResultsSetPagination()
+        
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = DesignationSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = DesignationSerializer(data=request.data)
@@ -138,9 +170,22 @@ class BranchListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        branches = Branch.objects.all()
-        serializer = BranchSerializer(branches, many=True)
-        return Response(serializer.data)
+        
+        queryset = Branch.objects.all().order_by('name')
+        
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) 
+            )
+            
+        paginator = StandardResultsSetPagination()
+        
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = BranchSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = BranchSerializer(data=request.data)
@@ -181,9 +226,54 @@ class EmployeeListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        employee_profiles = Profile.objects.filter(user__role=User.Role.EMPLOYEE)
-        serializer = EmployeeListSerializer(employee_profiles, many=True)
-        return Response(serializer.data)
+    
+        queryset = Profile.objects.select_related(
+            'user', 
+            'department', 
+            'designation', 
+            'monthly_pay_grade', 
+            'hourly_pay_grade',
+            'branch'
+        ).all().order_by('first_name')
+        role_filter = request.query_params.get('role', None)
+        if role_filter:
+            # User model ke role field par filter karein
+            queryset = queryset.filter(user__role__iexact=role_filter)
+            
+        # Filter by Department ID
+        department_id = request.query_params.get('department_id', None)
+        if department_id:
+            queryset = queryset.filter(department_id=department_id)
+            
+        # Filter by Designation ID
+        designation_id = request.query_params.get('designation_id', None)
+        if designation_id:
+            queryset = queryset.filter(designation_id=designation_id)
+
+        # Filter by Status (Active/Inactive, Profile ka status)
+        status_filter = request.query_params.get('status', None)
+        if status_filter:
+            queryset = queryset.filter(status__iexact=status_filter)
+
+
+        # 3. Search Logic (Employee Name / ID)
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search_query) |
+                Q(last_name__icontains=search_query) |
+                Q(employee_id__icontains=search_query) 
+            )
+            
+        # 4. Pagination Apply karna
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        # 5. Serialization
+        serializer = EmployeeListSerializer(page, many=True)
+        
+        # 6. Response mein paginated data return karna
+        return paginator.get_paginated_response(serializer.data)
 
 class EmployeeCreateView(APIView):
     permission_classes = [IsAdminUser]
@@ -281,10 +371,27 @@ class WarningListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        warnings = Warning.objects.all()
-        serializer = WarningSerializer(warnings, many=True)
-        return Response(serializer.data)
-
+        
+        queryset = Warning.objects.select_related(
+            'warning_to__profile', 
+            'warning_by__profile'
+        ).all().order_by('-warning_date', '-id')
+        
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(warning_to__profile__full_name__icontains=search_query) |
+                Q(subject__icontains=search_query)                          
+            )
+            
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = WarningSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
+    
+    
     def post(self, request):
         serializer = WarningSerializer(data=request.data)
         if serializer.is_valid():
@@ -330,9 +437,25 @@ class TerminationListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        terminations = Termination.objects.all()
-        serializer = TerminationSerializer(terminations, many=True)
-        return Response(serializer.data)
+        
+        queryset = Termination.objects.select_related(
+            'terminate_to__profile', 
+            'terminate_by__profile'
+        ).all().order_by('-termination_date', '-id')
+        
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(terminate_to__profile__full_name__icontains=search_query) |
+                Q(subject__icontains=search_query)                             
+            )
+            
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = TerminationSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = TerminationSerializer(data=request.data)
@@ -379,9 +502,23 @@ class PromotionListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        promotions = Promotion.objects.all()
-        serializer = PromotionSerializer(promotions, many=True)
-        return Response(serializer.data)
+
+        queryset = Promotion.objects.select_related(
+            'employee__profile', 
+            'promoted_department',
+            'promoted_designation'
+        ).all().order_by('-promotion_date', '-id')
+        
+
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__profile__full_name__icontains=search_query)
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = PromotionSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = PromotionSerializer(data=request.data)
@@ -450,9 +587,18 @@ class HolidayListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        items = Holiday.objects.all()
-        serializer = HolidaySerializer(items, many=True)
-        return Response(serializer.data)
+        """ List all holidays with search and pagination. """
+        queryset = Holiday.objects.all().order_by('name')
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) 
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = HolidaySerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = HolidaySerializer(data=request.data)
@@ -500,9 +646,18 @@ class PublicHolidayListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        items = PublicHoliday.objects.all()
-        serializer = PublicHolidaySerializer(items, many=True)
-        return Response(serializer.data)
+        """ List all public holidays with search and pagination (Only by Holiday Name). """
+        
+        queryset = PublicHoliday.objects.select_related('holiday').all().order_by('-start_date')
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(holiday__name__icontains=search_query) 
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = PublicHolidaySerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = PublicHolidaySerializer(data=request.data)
@@ -550,9 +705,22 @@ class WeeklyHolidayListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        items = WeeklyHoliday.objects.all()
-        serializer = WeeklyHolidaySerializer(items, many=True)
-        return Response(serializer.data)
+        
+        queryset = WeeklyHoliday.objects.all().order_by('day')
+        
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(day__icontains=search_query) 
+            )
+            
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = WeeklyHolidaySerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
     
     def post(self, request):
         serializer = WeeklyHolidaySerializer(data=request.data)
@@ -601,9 +769,22 @@ class LeaveTypeListCreateView(APIView):
     # Assuming LeaveTypeSerializer is imported
 
     def get(self, request):
-        items = LeaveType.objects.all()
-        serializer = LeaveTypeSerializer(items, many=True)
-        return Response(serializer.data)
+    
+        queryset = LeaveType.objects.all().order_by('name')
+        
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(name__icontains=search_query) 
+            )
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = LeaveTypeSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
         serializer = LeaveTypeSerializer(data=request.data)
@@ -611,7 +792,6 @@ class LeaveTypeListCreateView(APIView):
             # 1. Save the new LeaveType object
             new_leave_type = serializer.save()
             
-            # --- START: Automatic Leave Balance Allocation for ALL active Users ---
             default_days = new_leave_type.number_of_days
 
             # 2. Fetch ALL active users
@@ -700,7 +880,7 @@ class EarnLeaveRuleView(APIView):
 
 class ApplyForLeaveView(APIView):
     """
-    GET: Employee ke liye Leave Types aur Current Balance dikhata hai (my02.png).
+    GET: Employee ke liye Leave Types aur Current Balance dikhata hai .
     POST: Leave application submit karta hai (dynamic calculation aur validation ke saath).
     """
     permission_classes = [IsAuthenticated]
@@ -753,9 +933,16 @@ class MyLeaveApplicationsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        applications = LeaveApplication.objects.filter(employee=request.user).order_by('-application_date')
-        serializer = LeaveApplicationListSerializer(applications, many=True)
-        return Response(serializer.data)
+        
+        queryset = LeaveApplication.objects.filter(employee=request.user).order_by('-application_date')
+        
+        paginator = StandardResultsSetPagination()
+        
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = LeaveApplicationListSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
     
 
 class AllLeaveApplicationsView(APIView):
@@ -765,12 +952,16 @@ class AllLeaveApplicationsView(APIView):
     permission_classes = [IsAdminUser]
     
     def get(self, request):
-        all_applications = LeaveApplication.objects.all().order_by('-application_date')
         
-        # We still need a List Serializer to format the data for the frontend table
-        serializer = LeaveApplicationListSerializer(all_applications, many=True)
+        queryset = LeaveApplication.objects.all().order_by('-application_date')
         
-        return Response(serializer.data)
+        paginator = StandardResultsSetPagination()
+        
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        serializer = LeaveApplicationListSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
 
 
 class LeaveApprovalView(APIView):
@@ -971,11 +1162,22 @@ class WorkShiftListCreateAPIView(APIView):
     permission_classes = [IsAdminUser] 
 
     def get(self, request, *args, **kwargs):
-        """ List all work shifts  """
-        shifts = WorkShift.objects.all()
-        serializer = WorkShiftSerializer(shifts, many=True)
-        return Response(serializer.data)
+        """ List all work shifts with search and pagination. """
 
+        queryset = WorkShift.objects.all().order_by('shift_name')
+
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(shift_name__icontains=search_query) 
+            )
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = WorkShiftSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+    
     def post(self, request, *args, **kwargs):
         """ Create a new work shift """
         serializer = WorkShiftSerializer(data=request.data)
@@ -1023,16 +1225,16 @@ def format_duration(duration):
     minutes = (total_seconds % 3600) // 60
     return f"{hours:02d}:{minutes:02d}"
 
-# --- 2. Calculation Logic (Timezone Fixed) ---
+
+
 def calculate_attendance_status_and_times(attendance_record, employee_profile):
     """
     Calculates derived attendance fields (duration, is_late, late_duration, overtime_duration)
-    with Timezone Awareness.
-    Returns: (total_work_duration, is_late, late_duration, overtime_duration)
+    with Timezone Awareness. Handles Late Calculation even if only Punch In is available.
     """
     punch_in = attendance_record.punch_in_time
     punch_out = attendance_record.punch_out_time
-    attendance_date = attendance_record.attendance_date
+    # attendance_date = attendance_record.attendance_date # Not used directly for combination (Date Mismatch Fix)
     work_shift = employee_profile.work_shift
     
     total_work_duration = None
@@ -1040,37 +1242,71 @@ def calculate_attendance_status_and_times(attendance_record, employee_profile):
     late_duration = timedelta(0) 
     overtime_duration = timedelta(0)
 
-    # Only calculate if both punches and work shift are available
-    if punch_in and punch_out and punch_out > punch_in and work_shift:
-        total_work_duration = punch_out - punch_in
+    # Only calculate if a work shift is available
+    if work_shift and punch_in: # Base condition changed to check only for punch_in
+
+        local_tz = timezone.get_current_timezone() 
         
-        # Determine the timezone to use (using punch_in's timezone)
-        # Fallback to current timezone if punch_in is somehow naive
-        tz = punch_in.tzinfo if punch_in.tzinfo else timezone.get_current_timezone()
-        
-        # --- Late Calculation ---
+        # Get the reliable date from the local-converted PUNCH IN time
+        comparison_date = punch_in.astimezone(local_tz).date() 
+
+        # --- Late Calculation (Independent of Punch Out) ---
         late_count_time = work_shift.late_count_time
         if late_count_time:
-            late_count_dt_naive = datetime.combine(attendance_date, late_count_time)
-            # FIX: Make the shift time Timezone-Aware
-            late_count_dt = timezone.make_aware(late_count_dt_naive, timezone=tz)
+            # Shift time ko Local Timezone mein Aware banayein (Using comparison_date)
+            late_count_dt_naive = datetime.combine(comparison_date, late_count_time) 
+            late_count_dt_local = timezone.make_aware(late_count_dt_naive, timezone=local_tz)
             
-            if punch_in > late_count_dt:
+            # Punch-in time ko Local Timezone mein convert karein
+            punch_in_local = punch_in.astimezone(local_tz)
+            
+            if punch_in_local > late_count_dt_local:
                 is_late_calculated = True
-                late_duration = punch_in - late_count_dt
+                duration_diff = punch_in_local - late_count_dt_local
+                late_duration = max(timedelta(0), duration_diff) 
+
+        # --- Duration and Overtime Calculation (Requires Punch Out) ---
+        if punch_out and punch_out > punch_in:
+            total_work_duration = punch_out - punch_in # Total duration is calculated using aware times
+            
+            shift_end_time = work_shift.end_time
+            ot_delay_minutes = getattr(work_shift, 'ot_start_delay_minutes', 0)
+            
+            # 1. Shift end time ko Local Timezone mein Aware banayein (Using comparison_date)
+            shift_end_dt_naive = datetime.combine(comparison_date, shift_end_time) 
+            shift_end_dt_local = timezone.make_aware(shift_end_dt_naive, timezone=local_tz)
+            
+            # 2. Calculate Actual OT Start Time (Shift End + Delay)
+            actual_ot_start_dt_local = shift_end_dt_local + timedelta(minutes=ot_delay_minutes)
+            
+            # 3. Punch-out time ko Local Timezone mein convert karein
+            punch_out_local = punch_out.astimezone(local_tz)
+            
+            # 4. Compare punch_out with Actual OT Start Time
+            if punch_out_local > actual_ot_start_dt_local:
+                 duration_diff = punch_out_local - actual_ot_start_dt_local
+                 overtime_duration = max(timedelta(0), duration_diff)
         
-        # --- Overtime Calculation ---
-        shift_end_time = work_shift.end_time
-        shift_end_dt_naive = datetime.combine(attendance_date, shift_end_time)
-        # FIX: Make the shift end time Timezone-Aware
-        shift_end_dt = timezone.make_aware(shift_end_dt_naive, timezone=tz)
-        
-        if punch_out > shift_end_dt:
-            overtime_duration = punch_out - shift_end_dt
-    
+        # Note on One Time Punch:
+        # If punch_in exists but punch_out does not, total_work_duration and overtime_duration 
+        # will remain None/timedelta(0), indicating partial attendance/no completion. 
+        # The view (ManualAttendanceView.patch) should check if punch_in exists but punch_out does not,
+        # and update a status field (e.g., attendance_record.status = 'Partial Punch') if required.
+
     return total_work_duration, is_late_calculated, late_duration, overtime_duration
 
-# company/views.py (ManualAttendanceView)
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.shortcuts import get_object_or_404
+from datetime import timedelta
+# Assuming your user/profile/attendance models and serializers are imported correctly
+# from ..models import User, Profile, Attendance, ...
+# from ..serializers import ManualAttendanceInputSerializer, ManualAttendanceFilterSerializer, ...
+# from .utils import calculate_attendance_status_and_times, format_duration # Ensure these imports are correct
+
+# Ensure calculate_attendance_status_and_times is implemented as per the last fix:
+# (Late calculation only needs punch_in, Overtime needs both punch_in and punch_out)
 
 class ManualAttendanceView(APIView):
     """
@@ -1103,12 +1339,16 @@ class ManualAttendanceView(APIView):
                 attendance_date=target_date
             ).first()
 
+            # Time formatting
             punch_in = attendance_record.punch_in_time.time().strftime('%H:%M:%S') if attendance_record and attendance_record.punch_in_time else None
             punch_out = attendance_record.punch_out_time.time().strftime('%H:%M:%S') if attendance_record and attendance_record.punch_out_time else None
             
             # Use saved duration fields from the model
             overtime = format_duration(attendance_record.overtime_duration) if attendance_record else '00:00'
             late_time = format_duration(attendance_record.late_duration) if attendance_record else '00:00' 
+            
+            # Retrieve status (assuming you added a 'status' field to Attendance model)
+            status_indicator = getattr(attendance_record, 'status', 'Pending') if attendance_record else 'Pending'
 
             output.append({
                 "employee_id": employee.id,
@@ -1119,6 +1359,7 @@ class ManualAttendanceView(APIView):
                 "is_present": attendance_record.is_present if attendance_record else False,
                 "late_time": late_time,
                 "overtime": overtime,
+                "status": status_indicator, # Include status indicator
             })
             
         return Response(output)
@@ -1135,17 +1376,9 @@ class ManualAttendanceView(APIView):
         
         try:
             employee = User.objects.get(pk=employee_id)
+            # Use select_related for work_shift to avoid extra query
             employee_profile = Profile.objects.select_related('work_shift').get(user=employee)
-            print(f"\n--- DEBUG WORKSHIFT ---")
-            print(f"Employee ID: {employee_id}")
-            if employee_profile.work_shift:
-                print(f"WorkShift Assigned: YES")
-                print(f"Shift Name: {employee_profile.work_shift.shift_name}")
-                print(f"Shift End Time: {employee_profile.work_shift.end_time}")
-                print(f"Late Count Time: {employee_profile.work_shift.late_count_time}")
-            else:
-                print(f"WorkShift Assigned: NO (Value is None!)") 
-            print(f"-----------------------\n")
+            # DEBUG print statements removed for final code
         except (User.DoesNotExist, Profile.DoesNotExist):
             return Response({"error": f"Employee {employee_id} not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1157,43 +1390,59 @@ class ManualAttendanceView(APIView):
         punch_in = data.get('punch_in_time')
         punch_out = data.get('punch_out_time')
         
+        # Update raw punch times if provided
         if 'punch_in_time' in data:
             attendance_record.punch_in_time = punch_in
         if 'punch_out_time' in data:
             attendance_record.punch_out_time = punch_out
         
-        if attendance_record.punch_in_time and attendance_record.punch_out_time:
-            if attendance_record.punch_out_time <= attendance_record.punch_in_time:
+        # Check for Punch-in before calculation
+        if attendance_record.punch_in_time:
+            
+            # Punch Out validation (only if both are present)
+            if attendance_record.punch_out_time and attendance_record.punch_out_time <= attendance_record.punch_in_time:
                 return Response({"error": "Punch Out Time must be after Punch In Time."}, status=status.HTTP_400_BAD_REQUEST)
-                
-            # Calculation function call
+            
+            # Call calculation function (It calculates LATE time regardless of punch_out)
             (total_work_duration, 
              is_late_calculated, 
              late_duration,                
              overtime_duration) = calculate_attendance_status_and_times(attendance_record, employee_profile)
             
-            # Update derived fields based on calculation
-            attendance_record.total_work_duration = total_work_duration
-            attendance_record.overtime_duration = overtime_duration     
+            # Update Late status and duration (Always run if punch_in exists)
             attendance_record.late_duration = late_duration            
             attendance_record.is_late = is_late_calculated
-            attendance_record.is_present = True 
             
+            # Update Duration/Overtime (Only updated if punch_out was present in the calc function)
+            attendance_record.total_work_duration = total_work_duration
+            attendance_record.overtime_duration = overtime_duration     
+            attendance_record.is_present = True # Present if punch-in exists
+
+            # --- Status Indicator Logic (Single Punch Handling) ---
+            if attendance_record.punch_in_time and not attendance_record.punch_out_time:
+                 # Single Punch
+                 attendance_record.status = 'Single Punch' 
+            else:
+                 # Both punches are present
+                 attendance_record.status = 'Completed'
+
         else:
-            # If punches are incomplete/removed, reset durations
+            # If punch-in is removed or missing, reset all durations/status
             attendance_record.total_work_duration = None
             attendance_record.overtime_duration = timedelta(0)
             attendance_record.late_duration = timedelta(0)              
             
-            attendance_record.is_present = data.get('is_present', attendance_record.is_present)
-            attendance_record.is_late = data.get('is_late', attendance_record.is_late)
-            
+            attendance_record.is_present = data.get('is_present', False) 
+            attendance_record.is_late = False 
+            attendance_record.status = 'Pending' # Or 'Absent'
+        
         attendance_record.save()
         
         return Response({"message": f"Attendance record updated successfully for Employee {employee_id} on {target_date}.",
                         "late_time": format_duration(attendance_record.late_duration),   
                         "overtime": format_duration(attendance_record.overtime_duration)}, 
                         status=status.HTTP_200_OK)
+    
 
 
 class AttendanceReportBaseView(APIView):
@@ -1395,10 +1644,19 @@ class AllowanceListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """ List all Allowance instances. """
-        allowances = Allowance.objects.all()
-        serializer = AllowanceSerializer(allowances, many=True)
-        return Response(serializer.data)
+        """ List all Allowance instances with search and pagination. """
+        queryset = Allowance.objects.all().order_by('allowance_name')
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(allowance_name__icontains=search_query) |            # 1. Allowance Name par search
+                Q(allowance_type__icontains=search_query)              # 2. Allowance Type (internal value) par search
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = AllowanceSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """ Create a new Allowance instance. """
@@ -1461,10 +1719,20 @@ class DeductionListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """ List all Deduction instances. """
-        deductions = Deduction.objects.all()
-        serializer = DeductionSerializer(deductions, many=True)
-        return Response(serializer.data)
+        """ List all Deduction instances with search and pagination. """
+        queryset = Deduction.objects.all().order_by('deduction_name')
+
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(deduction_name__icontains=search_query) |            # 1. Deduction Name par search
+                Q(deduction_type__icontains=search_query)              # 2. Deduction Type (internal value) par search
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = DeductionSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """ Create a new Deduction instance. """
@@ -1517,7 +1785,6 @@ class DeductionDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 
-
 class MonthlyPayGradeListCreateView(APIView):
     """
     Handles GET: List all Monthly Pay Grades.
@@ -1526,19 +1793,30 @@ class MonthlyPayGradeListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        pay_grades = MonthlyPayGrade.objects.all()
-        serializer = MonthlyPayGradeSerializer(pay_grades, many=True)
-        return Response(serializer.data)
+        """ List all Monthly Pay Grade instances with search and pagination. """
+        queryset = MonthlyPayGrade.objects.all().order_by('grade_name')
+
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(grade_name__icontains=search_query) 
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = MonthlyPayGradeSerializer(page, many=True)
+
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         serializer = MonthlyPayGradeSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            serializer.save() # Serializer.save() will handle all nested logic and calculation
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# --- MonthlyPayGradeDetailView (Updated with PATCH) ---
+# --- MonthlyPayGradeDetailView (Updated and Fixed) ---
 class MonthlyPayGradeDetailView(APIView):
     """
     Handles GET: Retrieve a single Pay Grade.
@@ -1546,42 +1824,36 @@ class MonthlyPayGradeDetailView(APIView):
     """
     permission_classes = [IsAdminUser]
 
-    # Helper method to get the Pay Grade object or return 404
     def get_object(self, pk):
         return get_object_or_404(MonthlyPayGrade, pk=pk)
 
     def get(self, request, pk, format=None):
-        """Retrieve a specific monthly pay grade."""
         pay_grade = self.get_object(pk)
         serializer = MonthlyPayGradeSerializer(pay_grade)
         return Response(serializer.data)
 
     def put(self, request, pk, format=None):
-        """Update a monthly pay grade (full update)."""
         pay_grade = self.get_object(pk)
-        # partial=False for PUT (Full update is the default)
+        # Full update (partial=False)
         serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            serializer.save() 
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def patch(self, request, pk, format=None):
-        """Update a monthly pay grade (partial update)."""
         pay_grade = self.get_object(pk)
-        # Set partial=True for PATCH (Allows only a subset of fields)
+        # Partial update (partial=True)
         serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data, partial=True)
         if serializer.is_valid():
-            serializer.save()
+            serializer.save() 
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk, format=None):
-        """Delete a monthly pay grade."""
         pay_grade = self.get_object(pk)
         pay_grade.delete()
         return Response({"message": "Monthly Pay Grade deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-    
 
 class HourlyPayGradeListCreateView(APIView):
     """
@@ -1591,10 +1863,18 @@ class HourlyPayGradeListCreateView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """Retrieve all hourly pay grades."""
-        pay_grades = HourlyPayGrade.objects.all()
-        serializer = HourlyPayGradeSerializer(pay_grades, many=True)
-        return Response(serializer.data)
+        """ List all Hourly Pay Grade instances with search and pagination. """
+        queryset = HourlyPayGrade.objects.all().order_by('pay_grade_name')
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(pay_grade_name__icontains=search_query) 
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = HourlyPayGradeSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new hourly pay grade."""
@@ -1654,10 +1934,16 @@ class PerformanceCategoryListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """List all active and inactive performance categories."""
-        categories = PerformanceCategory.objects.all().order_by('category_name')
-        serializer = PerformanceCategorySerializer(categories, many=True)
-        return Response(serializer.data)
+        """List all active and inactive performance categories with search and pagination."""
+        queryset = PerformanceCategory.objects.all().order_by('category_name')
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(category_name__icontains=search_query)
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = PerformanceCategorySerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new performance category."""
@@ -1704,10 +1990,18 @@ class PerformanceCriteriaListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """List all performance criteria."""
-        criteria = PerformanceCriteria.objects.all().order_by('category__category_name', 'criteria_name')
-        serializer = PerformanceCriteriaSerializer(criteria, many=True)
-        return Response(serializer.data)
+        """List all performance criteria with search and pagination."""
+        queryset = PerformanceCriteria.objects.select_related('category').all().order_by('category__category_name', 'criteria_name')
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(criteria_name__icontains=search_query) |            # 1. Criteria Name par search
+                Q(category__category_name__icontains=search_query)   # 2. Related Category Name par search
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = PerformanceCriteriaSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new performance criterion."""
@@ -1756,10 +2050,18 @@ class EmployeePerformanceListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """List all performance reviews."""
-        reviews = EmployeePerformance.objects.select_related('employee', 'reviewed_by').prefetch_related('ratings').all().order_by('-review_month')
-        serializer = EmployeePerformanceSerializer(reviews, many=True)
-        return Response(serializer.data)
+        """List all performance reviews with search and pagination."""
+        queryset = EmployeePerformance.objects.select_related('employee', 'reviewed_by').prefetch_related('ratings').all().order_by('-review_month')
+        search_query = request.query_params.get('search', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__full_name__icontains=search_query) 
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = EmployeePerformanceSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new performance review with nested ratings."""
@@ -1810,56 +2112,55 @@ class PerformanceSummaryReportAPIView(APIView):
     permission_classes = [IsAdminUser] 
     
     def get(self, request, format=None):
-        # 1. Filters ko request se nikalna (Simple Query Params)
         employee_id = request.query_params.get('employee_id')
         from_date = request.query_params.get('from_date')
         to_date = request.query_params.get('to_date')
-
-        # 2. Base Query: Zaroori relationships ko pehle hi load karna
         queryset = EmployeePerformance.objects.select_related('employee').all()
-
-        # 3. Filtering: Jo filter milta hai, woh apply karna
         if employee_id:
             try:
                 queryset = queryset.filter(employee__id=int(employee_id)) 
             except ValueError:
-                return Response({"error": "Invalid employee ID."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": "Invalid employee ID format."}, status=status.HTTP_400_BAD_REQUEST)
 
         if from_date and to_date:
             queryset = queryset.filter(review_month__range=[from_date, to_date])
-        
-        # 4. Nested Data Optimization (Ratings detail ke liye zaroori)
-        # Prefetch use karte hain taaki Serializer ka get_ratings_detail tez chale
         queryset = queryset.prefetch_related(
             Prefetch(
                 'ratings',
-                # sirf zaroori fields ko select karo
                 queryset=PerformanceRating.objects.select_related('criteria__category')
             )
         ).order_by('-review_month') 
-
-        
-        serializer = PerformanceSummarySerializer(queryset, many=True)
-        
-        if not serializer.data and (employee_id or from_date):
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        if not page and (employee_id or from_date):
             return Response(
                 {"detail": "No performance data found for the selected filters."}, 
                 status=status.HTTP_404_NOT_FOUND
             )
-        return Response(serializer.data)
+        serializer = PerformanceSummarySerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
 class JobPostListCreateAPIView(APIView):
     """
     Handles GET (List) and POST (Create) operations using APIView.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminUser]
     
     def get(self, request, format=None):
-        """List all job posts (jp01.png)."""
-        # Queryset mein 'published_by' relationship ko pehle hi fetch kar lo
+        """List all job posts with search and pagination."""
         queryset = JobPost.objects.select_related('published_by').all().order_by('-created_at')
-        serializer = JobPostSerializer(queryset, many=True)
-        return Response(serializer.data)
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(job_title__icontains=search_query) |      # 1. Job Title par search
+                Q(description__icontains=search_query)      # 2. Description par search
+            )
+        paginator = StandardResultsSetPagination()
+
+        page = paginator.paginate_queryset(queryset, request, view=self)
+
+        serializer = JobPostSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new job post (jp02.png)."""
@@ -1915,11 +2216,16 @@ class TrainingTypeListCreateAPIView(APIView):
     permission_classes = [IsAdminUser] 
 
     def get(self, request, format=None):
-        """List all training types ."""
-        # Fetch all records, ordered by name
+        """List all training types with search and pagination."""
+        
         queryset = TrainingType.objects.all().order_by('training_type_name')
-        serializer = TrainingTypeSerializer(queryset, many=True)
-        return Response(serializer.data)
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(training_type_name__icontains=search_query)
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = TrainingTypeSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new training type """
@@ -1971,10 +2277,19 @@ class EmployeeTrainingListCreateAPIView(APIView):
     permission_classes = [IsAdminUser] 
 
     def get(self, request, format=None):
-        """List all employee training records."""
+        """List all employee training records with search and pagination."""
         queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
-        serializer = EmployeeTrainingSerializer(queryset, many=True)
-        return Response(serializer.data)
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__full_name__icontains=search_query) |            # 1. Employee Name par search
+                Q(training_type__training_type_name__icontains=search_query) | # 2. Training Type Name par search
+                Q(subject__icontains=search_query)                           # 3. Subject par search
+            )
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = EmployeeTrainingSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new employee training record."""
@@ -2018,48 +2333,47 @@ class EmployeeTrainingDetailAPIView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 
-
 class EmployeeTrainingReportAPIView(APIView):
     """
-    Handles GET request for the Employee Training Report (emt01.png).
+    Handles GET request for the Employee Training Report (emt01.png) with Pagination.
     Filters training records based on employee ID provided in query parameters.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        # 1. Query parameter se employee ID lena
         employee_profile_id = request.query_params.get('employee_id', None)
-
-        # 2. Base Queryset (Optimization ke liye select_related use karein)
         queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
-
-        # 3. Filtering Logic (Agar employee_id provided hai)
         if employee_profile_id:
-            # Note: Hamara EmployeeTraining model 'users.Profile' se link hai.
-            # isliye hum 'employee_id' field (Profile model ki primary key) se filter karenge.
             try:
-                
                 employee_profile_id = int(employee_profile_id) 
                 queryset = queryset.filter(employee__pk=employee_profile_id)
             except ValueError:
-                # Agar ID invalid ho to 400 Bad Request return karein
                 return Response({"detail": "Invalid employee ID format."}, status=status.HTTP_400_BAD_REQUEST)
+        paginator = StandardResultsSetPagination()
 
-        serializer = EmployeeTrainingSerializer(queryset, many=True)
-        
-        
-        return Response(serializer.data)
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = EmployeeTrainingSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
     
 
 class AwardListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """List all employee awards (award.png)."""
-        # Optimize query by selecting related FKs
+        """List all employee awards with search and pagination."""
         queryset = Award.objects.select_related('employee').all().order_by('-award_month')
-        serializer = AwardSerializer(queryset, many=True)
-        return Response(serializer.data)
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__full_name__icontains=search_query) |  # Employee ka pura naam
+                Q(award_name__icontains=search_query) |            # Award Enum value (internal value)
+                Q(gift_item__icontains=search_query)              # Gift item par search
+            )
+
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = AwardSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new employee award (award02.png)."""
@@ -2107,10 +2421,19 @@ class NoticeListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request, format=None):
-        """List all notices."""
+        """List all notices with search and pagination."""
+
         queryset = Notice.objects.all().order_by('-publish_date')
-        serializer = NoticeSerializer(queryset, many=True)
-        return Response(serializer.data)
+
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(title__icontains=search_query)
+        paginator = StandardResultsSetPagination()
+
+        page = paginator.paginate_queryset(queryset, request, view=self)
+
+        serializer = NoticeSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
         """Create a new notice."""
@@ -2274,6 +2597,43 @@ class LateDeductionRuleRetrieveUpdateDestroyAPIView(APIView):
     
 
 
+# --- Helper for Recalculation (APIView ke andar ya ek utility function) ---
+def _recalculate_fixed_tax(gender):
+    """ 
+    Recalculates fixed tax (Cumulative Tax) for all rules of a given gender.
+    Must be called AFTER all rules are saved in the database.
+    """
+    # Rules ko limit ke ascending order mein fetch karein
+    rules = TaxRule.objects.filter(gender=gender).order_by('total_income_limit')
+    previous_limit = Decimal('0.00')
+    
+    for i, rule in enumerate(rules):
+        if rule.slab_type == 'REMAINING':
+            # Last slab ka fixed tax 0 hota hai
+            cumulative_fixed_tax = Decimal('0.00')
+        else:
+            # Pichle rule se cumulative tax nikalna
+            if i == 0:
+                tax_on_previous_slabs = Decimal('0.00')
+            else:
+                # Pichle rule (i-1) ka final fixed tax uthaya
+                tax_on_previous_slabs = rules[i-1].taxable_amount_fixed
+            
+            # Current slab mein aayi income
+            taxable_income_in_slab = rule.total_income_limit - previous_limit
+            
+            # Tax sirf current slab ki income par calculate karein
+            tax_in_this_slab = (taxable_income_in_slab * rule.tax_rate_percentage) / Decimal('100.0')
+            
+            # Cumulative fixed tax = Pichla Tax + Current Slab ka Tax
+            cumulative_fixed_tax = tax_on_previous_slabs + tax_in_this_slab
+
+        rule.taxable_amount_fixed = round(cumulative_fixed_tax, 2)
+        rule.save(update_fields=['taxable_amount_fixed'])
+        previous_limit = rule.total_income_limit # Update previous limit for the next iteration
+
+
+
 class TaxRuleSetupAPIView(APIView):
     """
     Handles listing all Tax Rules (GET) and bulk updating/creating (PUT/POST) them.
@@ -2298,40 +2658,487 @@ class TaxRuleSetupAPIView(APIView):
         })
 
     def put(self, request):
-        """ Bulk updates/creates Tax Rules based on the list provided. """
-        rules_data = request.data.get('rules', []) # Frontend se list expect kar rahe hain
+        """ 
+        Bulk syncs Tax Rules using Delete & Recreate strategy:
+        Deletes all existing rules and creates new ones from the input list.
+        """
+        rules_data = request.data.get('rules', []) 
         
         if not isinstance(rules_data, list):
-            return Response({"error": "Expected a list of rules."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Expected a list of rules under the key 'rules'."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ya toh sab save ho, ya kuch nahi
         with transaction.atomic():
-            results = []
+            
+            # 1. 🛑 FORCE DELETE ALL EXISTING RULES 
+            # Saare purane rules ko hatana, taaki list mein jo nahi hain woh delete ho jaayen.
+            TaxRule.objects.all().delete() 
+            
+            rules_to_save = []
             errors = []
             
+            # 2. ✅ Validate and Collect Data (New Creation)
             for item in rules_data:
-                rule_id = item.get('id')
                 
-                if rule_id:
-                    # Update existing rule
-                    try:
-                        instance = TaxRule.objects.get(id=rule_id)
-                        serializer = TaxRuleSerializer(instance, data=item)
-                    except TaxRule.DoesNotExist:
-                        errors.append({"id": rule_id, "error": "Rule not found for update."})
-                        continue
-                else:
-                    # Create new rule
-                    serializer = TaxRuleSerializer(data=item)
+                # Naye rules create ho rahe hain, isliye ID aur fixed tax ko ignore karein
+                item.pop('id', None) 
+                item.pop('taxable_amount_fixed', None)
+                
+                # Ab hamesha Naya Serializer (Create) use hoga
+                serializer = TaxRuleSerializer(data=item) 
 
                 if serializer.is_valid():
-                    serializer.save()
-                    results.append(serializer.data)
+                    rules_to_save.append(serializer)
                 else:
                     errors.append({"data": item, "errors": serializer.errors})
             
             if errors:
-                # Agar koi error ho, toh transaction revert ho jaayega
-                return Response({"message": "Errors occurred during bulk update/create.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
+                # Agar koi bhi validation error aaya, toh transaction revert ho jaayega (Delete bhi revert)
+                return Response({"message": "Validation errors occurred. No changes saved.", "errors": errors}, status=status.HTTP_400_BAD_REQUEST)
                 
-            return Response(results, status=status.HTTP_200_OK)
+            # 3. SAVE ALL NEW RULES
+            for serializer in rules_to_save:
+                serializer.save()
+            
+            # 4. RECALCULATE FIXED TAX (Correct Ordering ke saath)
+            _recalculate_fixed_tax(GenderChoices.MALE)
+            _recalculate_fixed_tax(GenderChoices.FEMALE)
+            
+            # 5. Return Updated Data (GET call, jismein ab sirf naye rules honge)
+            return self.get(request)
+
+def _calculate_unpaid_days(employee, target_date):
+    """
+    Calculates the total number of UNPAID days for an employee in the target month.
+    Uses Attendance, Leave, and Holiday models.
+    """
+    
+    year = target_date.year
+    month = target_date.month
+    
+    # 1. Total Calendar Days
+    days_in_month = monthrange(year, month)[1]
+    total_calendar_days = Decimal(days_in_month)
+    month_end_date = target_date.replace(day=days_in_month)
+    
+    current_date = target_date
+    paid_days_count = Decimal('0.0')
+    
+    # 2. Fetch Static Paid Days Sources
+    weekly_holidays = set(
+        WeeklyHoliday.objects.filter(is_active=True).values_list('day', flat=True)
+    )
+    
+    # 3. Fetch Public Holidays
+    public_holiday_dates = set()
+    ph_queryset = PublicHoliday.objects.filter(
+        start_date__lte=month_end_date,
+        end_date__gte=target_date
+    )
+    for ph in ph_queryset:
+        day = ph.start_date
+        while day <= ph.end_date:
+            if day.month == month:
+                 public_holiday_dates.add(day)
+            day += timedelta(days=1)
+
+    # 4. Fetch Approved Paid Leave
+    # Filter for APPROVED status leaves within the month
+    approved_paid_leaves_queryset = LeaveApplication.objects.filter(
+        employee=employee,
+        status=LeaveStatus.APPROVED, 
+        # Assuming all LeaveTypes are considered 'paid' once approved (adjust if needed)
+        from_date__lte=month_end_date,
+        to_date__gte=target_date
+    )
+    
+    approved_paid_leave_dates = set()
+    for leave in approved_paid_leaves_queryset:
+        day = leave.from_date
+        while day <= leave.to_date:
+            if day.month == month:
+                approved_paid_leave_dates.add(day)
+            day += timedelta(days=1)
+            
+    # 5. Fetch Actual Attendance
+    present_dates = set(
+        Attendance.objects.filter(
+            employee=employee,
+            attendance_date__year=year,
+            attendance_date__month=month,
+            is_present=True 
+        ).values_list('attendance_date', flat=True)
+    )
+
+    
+    # 6. Day-by-Day Reconciliation (Counting Paid Days)
+    
+    while current_date <= month_end_date:
+        if current_date.month == month:
+            # Check the day name (e.g., 'Monday', 'Tuesday')
+            day_name = current_date.strftime('%A') 
+            
+            is_paid_day = False
+            
+            # Priority Check 1: Statutory Holidays/Offs (Paid regardless of presence)
+            if day_name in weekly_holidays or current_date in public_holiday_dates:
+                is_paid_day = True
+            
+            # Priority Check 2: Approved Leave (Paid)
+            elif current_date in approved_paid_leave_dates:
+                is_paid_day = True
+            
+            # Priority Check 3: Actual Work Done (Present)
+            elif current_date in present_dates:
+                is_paid_day = True
+                
+            # --- Final Tally ---
+            if is_paid_day:
+                paid_days_count += Decimal('1.0')
+            
+        current_date += timedelta(days=1)
+        
+    # 7. Unpaid Days Calculation
+    unpaid_absence_days = total_calendar_days - paid_days_count
+    
+    return max(Decimal('0.0'), unpaid_absence_days)
+
+
+
+
+class SinglePaySlipGenerateRetrieveAPIView(APIView):
+    
+    permission_classes = [IsAdminUser] 
+    
+    def _calculate_monthly_tax(self, employee, taxable_income):
+        """
+        Calculates the monthly TDS/Tax based on Annual Tax Slabs.
+        Uses cumulative fixed amounts from previous slabs correctly.
+        """
+        if taxable_income <= 0:
+            return Decimal('0.00')
+
+        # 1. Employee Data
+        gender = employee.profile.gender if employee.profile and employee.profile.gender else 'MALE'
+        annual_taxable_income = taxable_income * Decimal('12.0')
+        
+        # 2. Fetch Rules
+        # NOTE: It is critical that TaxRule.taxable_amount_fixed stores the CUMULATIVE tax 
+        # up to that slab's limit.
+        tax_rules = TaxRule.objects.filter(
+            gender=gender, 
+            is_active=True
+        ).order_by('total_income_limit')
+
+        total_annual_tax = Decimal('0.00')
+        previous_limit = Decimal('0.00')
+        
+        # 3. Slab-by-Slab Calculation
+        for i, rule in enumerate(tax_rules):
+            current_limit = rule.total_income_limit
+            tax_rate = rule.tax_rate_percentage
+            
+            # --- Check 1: Income falls COMPLETELY ABOVE this slab ---
+            if annual_taxable_income > current_limit:
+                
+                # If the income exceeds the slab limit, we accumulate the fixed tax for this slab.
+                # NOTE: Assuming rule.taxable_amount_fixed is the CUMULATIVE tax up to current_limit.
+                # If it's a REMAINING rule, it shouldn't have a fixed amount, so we handle it next.
+                
+                if rule.slab_type == 'REMAINING':
+                    # This should ideally be the last rule. Tax the rest of the income.
+                    taxable_in_slab = annual_taxable_income - previous_limit
+                    tax_in_slab = (taxable_in_slab * tax_rate) / Decimal('100.0')
+                    total_annual_tax += tax_in_slab
+                    break # Calculation finished
+
+                # If it's a NEXT/FIXED slab, update the total tax to the cumulative tax amount
+                # and set previous_limit for the next iteration.
+                total_annual_tax = rule.taxable_amount_fixed
+                previous_limit = current_limit
+                
+            # --- Check 2: Income falls WITHIN this slab (The Stopping Point) ---
+            elif annual_taxable_income > previous_limit:
+                
+                # 1. Pichle slabs ka CUMULATIVE FIXED TAX jodo.
+                # Yeh tax pichle rule ke 'taxable_amount_fixed' mein store hona chahiye.
+                tax_from_previous_slabs = Decimal('0.00')
+                if i > 0:
+                    # Access the CUMULATIVE tax fixed amount from the *previous* rule
+                    tax_from_previous_slabs = tax_rules[i-1].taxable_amount_fixed
+                    
+                # Total annual tax is now set to the cumulative tax up to the previous limit
+                total_annual_tax = tax_from_previous_slabs
+                
+                # 2. Current slab mein kitni income aayi?
+                taxable_in_current_slab = annual_taxable_income - previous_limit
+                
+                # 3. Tax calculate karein aur jodo
+                tax_in_slab = (taxable_in_current_slab * tax_rate) / Decimal('100.0')
+                total_annual_tax += tax_in_slab
+                
+                # Calculation complete
+                break 
+
+            # --- Check 3: Income is below the current slab's starting limit ---
+            # If income is below the minimum taxable limit, loop finishes and total_annual_tax remains 0.
+            
+        # 4. Monthly Tax
+        monthly_tax = total_annual_tax / Decimal('12.0')
+        return round(monthly_tax, 2)
+
+
+    
+
+    def _generate_payslip(self, employee, target_date, requesting_user):
+        """ The core calculation logic, fixed for caps and consistent deductions, 
+            using the MonthlyPayGrade.overtime_rate as the fixed hourly pay rate.
+        """
+        
+        if not employee.profile or not employee.profile.monthly_pay_grade:
+            raise ValueError("Employee profile or assigned Monthly Pay Grade is missing.")
+            
+        pay_grade = employee.profile.monthly_pay_grade
+        master_basic_salary = pay_grade.basic_salary
+        
+        # --- STEP 1 & 2: Base Figures & Cuts ---
+        year, month = target_date.year, target_date.month
+        days_in_month = Decimal(monthrange(year, month)[1])
+        if days_in_month == 0: raise ValueError("Invalid month range calculation.")
+            
+        per_day_rate_basic = master_basic_salary / days_in_month 
+        per_hour_rate = per_day_rate_basic / Decimal('8.0') # Still needed for Late Deduction calculation base
+
+        late_count = Attendance.objects.filter(
+            employee=employee, attendance_date__year=year, attendance_date__month=month, is_late=True
+        ).count()
+        
+        late_deduction_amount = Decimal('0.00')
+        late_rule = LateDeductionRule.objects.filter(
+            late_days_threshold__lte=late_count 
+        ).order_by('-late_days_threshold').first()
+        
+        if late_rule:
+            late_deduction_days = late_rule.deduction_days
+            late_deduction_amount = late_deduction_days * per_day_rate_basic
+            
+        unpaid_absence_days = _calculate_unpaid_days(employee, target_date)
+        unjustified_cut_amount = unpaid_absence_days * per_day_rate_basic
+        
+        # --- STEP 3: Adjusted Earning Calculation (Pro-Rata & Overtime) ---
+        
+        # Summing up all overtime_duration for the month
+        total_ot_duration = Attendance.objects.filter(
+            employee=employee, attendance_date__year=year, attendance_date__month=month,
+        ).aggregate(total_ot=Sum('overtime_duration'))['total_ot'] or timedelta(0)
+        
+        # 🛑 FIX: Use Pay Grade's overtime_rate directly as the HOURLY PAY RATE
+        ot_hourly_rate = pay_grade.overtime_rate 
+
+        # Check for valid rate
+        if ot_hourly_rate is None or ot_hourly_rate <= Decimal('0.00'):
+            overtime_pay_amount = Decimal('0.00')
+        else:
+            # Calculate Total Hours from the summed timedelta
+            total_ot_hours = Decimal(total_ot_duration.total_seconds() / 3600)
+
+            # Calculation: Total Hours * Fixed Hourly Rate (No per_hour_rate multiplication)
+            overtime_pay_amount = total_ot_hours * ot_hourly_rate
+            
+        overtime_pay_amount = round(overtime_pay_amount, 2)
+        
+        # Final Basic Salary Calculation (Pro-Rata)
+        final_basic_salary = master_basic_salary - unjustified_cut_amount 
+        final_basic_salary = round(final_basic_salary, 2)
+
+        total_allowances_sum = Decimal('0.00')
+        standard_deductions_sum = Decimal('0.00') 
+        allowance_details = []
+        deduction_details = []
+        
+        # Standard Allowances: Calculate on Adjusted Basic (Pro-Rata Allowance)
+        for pg_allowance in pay_grade.paygradeallowance_set.select_related('allowance').all():
+            calculated_amount = final_basic_salary * (pg_allowance.value / 100) 
+            
+            limit = pg_allowance.allowance.limit_per_month
+            
+            if limit is not None and limit > Decimal('0.00'):
+                amount = min(calculated_amount, limit)
+            else:
+                amount = calculated_amount
+            
+            amount = round(amount, 2)
+            total_allowances_sum += amount
+            allowance_details.append({'item_name': pg_allowance.allowance.allowance_name, 'amount': amount})
+
+        final_gross_salary = final_basic_salary + total_allowances_sum + overtime_pay_amount
+        final_gross_salary = round(final_gross_salary, 2)
+
+        # Standard Deductions (PF, ESI): Calculate on Adjusted Basic
+        for pg_deduction in pay_grade.paygradededuction_set.select_related('deduction').all():
+            calculated_amount = final_basic_salary * (pg_deduction.value / 100) 
+            
+            limit = pg_deduction.deduction.limit_per_month 
+            
+            if limit is not None and limit > Decimal('0.00'):
+                amount = min(calculated_amount, limit)
+            else:
+                amount = calculated_amount
+            
+            amount = round(amount, 2)
+            standard_deductions_sum += amount
+            deduction_details.append({'item_name': pg_deduction.deduction.deduction_name, 'amount': amount})
+        
+        # 3. TAX DEDUCTION (TDS)
+        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary) 
+        standard_deductions_sum += tax_amount
+        if tax_amount > 0:
+            deduction_details.append({'item_name': 'Income Tax (TDS)', 'amount': tax_amount})
+            
+        # --- STEP 4: FINAL NET CALCULATION ---
+
+        total_deductions_for_net = standard_deductions_sum + late_deduction_amount 
+        
+        final_net_salary = final_gross_salary - total_deductions_for_net
+        final_net_salary = round(final_net_salary, 2)
+
+        # --- STEP 5: Store PaySlip and Details ---
+        
+        with transaction.atomic():
+            payslip, created = PaySlip.objects.update_or_create(
+                employee=employee, payment_month=target_date,
+                defaults={
+                    'basic_salary': final_basic_salary, 
+                    'total_overtime_pay': overtime_pay_amount,    
+                    'total_tax_deduction': tax_amount,
+                    'total_allowances': total_allowances_sum, 
+                    'total_deductions': total_deductions_for_net + unjustified_cut_amount, 
+                    'gross_salary': final_gross_salary,
+                    'net_salary': final_net_salary,
+                    'total_days_in_month': days_in_month,
+                    'working_days': days_in_month - unpaid_absence_days, 
+                    'unjustified_absence': unpaid_absence_days,
+                    'late_attendance_count': late_count,
+                    'status': 'Calculated',
+                    'generated_by': requesting_user
+                }
+            )
+
+            payslip.details.all().delete()
+            
+            # Store Allowances (Standard)
+            for item in allowance_details:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Allowance', **item)
+            
+            # Store Overtime Pay separately
+            if overtime_pay_amount > 0:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Allowance', item_name='Overtime Pay', amount=overtime_pay_amount)
+            
+            # Store Standard Deductions and Tax
+            for item in deduction_details:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', **item)
+
+            # Store Transactional Cuts (Late Cut)
+            if late_deduction_amount > 0:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', item_name=f'Late Attendance Cut ({late_count} Lates)', amount=late_deduction_amount)
+            
+            # Store Absence Cut for transparency only 
+            if unjustified_cut_amount > 0:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', item_name='Unjustified Absence Cut (Days Not Paid)', amount=unjustified_cut_amount)
+                
+            return payslip
+                    
+    def post(self, request):
+        """ Triggers the payslip calculation and storage. """
+        
+        employee_id = request.data.get('employee_id')
+        month_str = request.data.get('month') 
+        
+        if not employee_id or not month_str:
+             return Response({"error": "Employee ID and Month (YYYY-MM) are required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            employee = get_object_or_404(User, pk=employee_id)
+            target_date = datetime.strptime(month_str, '%Y-%m').date().replace(day=1)
+        except Exception:
+            return Response({"error": "Invalid employee ID or month format."}, status=status.HTTP_404_NOT_FOUND)
+        
+        try:
+            payslip_record = self._generate_payslip(employee, target_date, request.user)
+            return Response({"message": "Payslip generated successfully.", "payslip_id": payslip_record.pk}, status=status.HTTP_200_OK)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"Payslip generation failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request, pk):
+        """ Retrieve a specific payslip by PK (Payslip ID). """
+        
+        payslip = get_object_or_404(
+            PaySlip.objects.select_related(
+                'employee__profile__designation', 'employee__profile__department'
+            ).prefetch_related('details'),
+            pk=pk
+        )
+        
+        serializer = PaySlipDetailSerializer(payslip)
+        return Response(serializer.data)
+    
+
+
+
+class MonthlySalarySheetView(APIView):
+    """ Lists payment status and gross salary for all employees with Pagination. """
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        
+        filter_serializer = MonthlySalaryFilterSerializer(data=request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        target_date = filter_serializer.validated_data['month']
+
+        # 1. Base Employee QuerySet
+        employees_queryset = User.objects.filter(profile__status='Active').select_related('profile__pay_grade', 'profile').order_by('profile__full_name')
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(employees_queryset, request, view=self)
+        
+        # 2. Payslip Prefetching (Only for paginated employees)
+        # Payslip records ko sirf current page ke employee IDs ke liye fetch karo
+        employee_ids_on_page = [e.id for e in page]
+        
+        payslips_queryset = PaySlip.objects.filter(
+            payment_month=target_date,
+            employee_id__in=employee_ids_on_page # Filter by paginated IDs
+        ).prefetch_related('details')
+        
+        payslips_map = {p.employee_id: p for p in payslips_queryset}
+
+        output = []
+        # 3. Loop through the paginated list ('page')
+        for employee in page: # Loop now runs only for 10-20 employees
+            profile = employee.profile
+            payslip = payslips_map.get(employee.id)
+            
+            pay_grade_name = profile.pay_grade.grade_name if profile.pay_grade else 'N/A'
+            
+            overtime_pay = Decimal('0.00')
+            tax_deduction = Decimal('0.00')
+            
+            if payslip:
+                for detail in payslip.details.all():
+                    if detail.item_type == 'Allowance' and detail.item_name == 'Overtime Pay':
+                        overtime_pay = detail.amount
+                    elif detail.item_type == 'Deduction' and detail.item_name == 'Income Tax (TDS)':
+                        tax_deduction = detail.amount
+
+            output.append({
+                "payslip_id": payslip.pk if payslip else None,
+                "employee_name": profile.full_name,
+                "pay_grade": pay_grade_name,
+                "gross_salary": payslip.gross_salary if payslip else Decimal('0.00'), 
+                "overtime_pay": overtime_pay,                      
+                "tax_deduction": tax_deduction,                   
+                "status": payslip.status if payslip else 'Pending',
+                "action": "Generate Payslip" if not payslip or payslip.status == 'Pending' else "View/Re-Generate"
+            })
+
+        return paginator.get_paginated_response(output)

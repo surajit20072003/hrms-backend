@@ -1,11 +1,13 @@
 from rest_framework import serializers
 from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
 Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
-EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule
+EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,PaySlip,PaySlipDetail
 from users.models import User, Profile, Education, Experience
 from users.enums import JobStatus,LeaveStatus,SlabChoices
 from django.db.models import Sum
+from django.db import transaction
 from decimal import Decimal
+from datetime import datetime
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Department
@@ -108,6 +110,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source='user.role', read_only=True)
     department = serializers.CharField(source='department.name', read_only=True, allow_null=True)
     designation = serializers.CharField(source='designation.name', read_only=True, allow_null=True)
+    branch = serializers.CharField(source='branch.name', read_only=True, allow_null=True)
     pay_grade = serializers.SerializerMethodField()
     # We need the user's primary key (ID) for detail/edit/delete actions
     user_id = serializers.IntegerField(source='user.id', read_only=True)
@@ -121,6 +124,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'role',
             'department',
             'designation',
+            'branch',
             'phone',
             'employee_id', # This is Fingerprint/Emp No.
             'pay_grade',
@@ -416,7 +420,7 @@ class WorkShiftSerializer(serializers.ModelSerializer):
     """Serializer for creating, listing, and updating work shifts."""
     class Meta:
         model = WorkShift
-        fields = ['id', 'shift_name', 'start_time', 'end_time', 'late_count_time']
+        fields = ['id', 'shift_name', 'start_time', 'end_time', 'late_count_time','ot_start_delay_minutes']
 
     def validate(self, data):
         start_time = data.get('start_time')
@@ -453,7 +457,7 @@ class DailyAttendanceFilterSerializer(serializers.Serializer):
     target_date = serializers.DateField(required=True)
 
 class MonthlySummaryFilterSerializer(serializers.Serializer):
-    """ Specific filter for Attendance Summary Report (only month needed). (lr04.png) """
+    """ Specific filter for Attendance Summary Report (only month needed) """
     # Month format: YYYY-MM
     month = serializers.CharField(max_length=7, required=True)
 
@@ -563,35 +567,74 @@ class PayGradeDeductionSerializer(serializers.ModelSerializer):
             'value': {'read_only': True}
         } 
 
-# --- 2. MonthlyPayGradeSerializer Fix: Logic to Fetch Default Values ---
+
+
 
 class MonthlyPayGradeSerializer(serializers.ModelSerializer):
     
-    # Read nested data 
+    # Read nested data (For viewing output)
     allowance_details = PayGradeAllowanceSerializer(source='paygradeallowance_set', many=True, read_only=True)
     deduction_details = PayGradeDeductionSerializer(source='paygradededuction_set', many=True, read_only=True)
     
-    # Write nested data (Input will only contain [{"allowance": ID}, ...])
-    # The 'value' field is not expected in the input.
-    allowances_to_add = PayGradeAllowanceSerializer(many=True, write_only=True, required=False)
-    deductions_to_add = PayGradeDeductionSerializer(many=True, write_only=True, required=False)
+    # Write nested data (Input for M2M relationship - sirf ID bhejni hai)
+    allowances_to_add = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
+    deductions_to_add = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
+
 
     class Meta:
         model = MonthlyPayGrade
         fields = [
-            'id', 'grade_name', 'gross_salary', 'percentage_of_basic_g', 
-            'basic_salary', 'overtime_rate', 'is_active', 
+            'id', 'grade_name', 'basic_salary', 'gross_salary', 'net_salary', 
+            'overtime_rate', 'is_active', 
             'allowance_details', 'deduction_details', 
             'allowances_to_add', 'deductions_to_add'
         ]
-        read_only_fields = ['id', 'basic_salary']
+        # Gross aur Net salary ab calculated aur stored hain.
+        read_only_fields = ['id', 'gross_salary', 'net_salary'] 
+        # NOTE: basic_salary ab input field hai, read_only nahi.
 
-    def calculate_basic_salary(self, gross_salary, percentage):
-        if percentage > 0 and gross_salary > 0:
-            return (gross_salary * percentage) / Decimal(100)
-        return Decimal(0.00)
+    # --- Calculation Core Logic (Pichle response se) ---
+    def calculate_salaries(self, instance, basic_salary_input):
+        # ... (Calculation logic, jismein basic, allowance, deduction, aur limits ka use hota hai) ...
+        # [Use the exact code block for calculate_salaries from the previous response]
+        
+        basic = basic_salary_input
+        total_allowance = Decimal('0.00')
+        total_deduction = Decimal('0.00')
 
-    # --- Helper function for M2M creation/update ---
+        # Calculate Total Allowances
+        for pga in instance.paygradeallowance_set.select_related('allowance'):
+            allowance = pga.allowance
+            value = pga.value
+            limit = allowance.limit_per_month or Decimal('9999999.00')
+
+            if allowance.allowance_type == 'Percentage':
+                amount = (basic * value) / Decimal('100.00')
+            else: # Fixed
+                amount = value
+            
+            total_allowance += min(amount, limit)
+            
+        # Calculate Total Deductions
+        for pgd in instance.paygradededuction_set.select_related('deduction'):
+            deduction = pgd.deduction
+            value = pgd.value
+            limit = deduction.limit_per_month or Decimal('9999999.00')
+            
+            if deduction.deduction_type == 'Percentage':
+                amount = (basic * value) / Decimal('100.00')
+            else: # Fixed
+                amount = value
+            
+            total_deduction += min(amount, limit)
+            
+        gross = basic + total_allowance
+        net = gross - total_deduction
+        
+        return gross, net, total_allowance, total_deduction
+
+
+    # --- Helper function for M2M creation/update (Fixed logic) ---
     def _create_update_m2m(self, pay_grade_instance, allowances_data, deductions_data, is_update=False):
         
         # 1. Handle Allowances
@@ -600,14 +643,23 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                 pay_grade_instance.paygradeallowance_set.all().delete()
                 
             for item in allowances_data:
-                # item['allowance'] is the actual Allowance object due to FK validation
-                allowance_obj = item['allowance']
+                # Validation check for 'allowance' key
+                if 'allowance' not in item or not item['allowance']:
+                    continue
+                    
+                # Item['allowance'] is the ID here, fetch the object
+                try:
+                    allowance_obj = Allowance.objects.get(pk=item['allowance'])
+                except Allowance.DoesNotExist:
+                    raise serializers.ValidationError(
+                        {"allowances_to_add": f"Allowance ID {item['allowance']} not found."}
+                    )
                 
                 # Logic: Fetch the default value from the Allowance object
-                if allowance_obj.allowance_type == Allowance.AllowanceType.PERCENTAGE:
-                    default_value = allowance_obj.percentage_of_basic
-                else: # Fixed Type
-                    default_value = allowance_obj.limit_per_month
+                default_value = allowance_obj.percentage_of_basic # Default fallback
+                if allowance_obj.allowance_type == Allowance.AllowanceType.FIXED:
+                    # If Fixed, use limit_per_month as the PayGrade's default value
+                    default_value = allowance_obj.limit_per_month or Decimal('0.00')
                 
                 PayGradeAllowance.objects.create(
                     pay_grade=pay_grade_instance, 
@@ -615,58 +667,59 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                     value=default_value # Inject the default value
                 )
 
-        # 2. Handle Deductions (Similar logic)
+        
         if deductions_data is not None:
             if is_update:
                 pay_grade_instance.paygradededuction_set.all().delete()
                 
             for item in deductions_data:
-                deduction_obj = item['deduction']
+                if 'deduction' not in item or not item['deduction']:
+                    continue
+                try:
+                    deduction_obj = Deduction.objects.get(pk=item['deduction'])
+                except Deduction.DoesNotExist:
+                    raise serializers.ValidationError(
+                        {"deductions_to_add": f"Deduction ID {item['deduction']} not found."}
+                    )
                 
                 # Logic: Fetch the default value from the Deduction object
-                if deduction_obj.deduction_type == Deduction.DeductionType.PERCENTAGE:
-                    default_value = deduction_obj.percentage_of_basic
-                else: # Fixed Type
-                    default_value = deduction_obj.limit_per_month
+                default_value = deduction_obj.percentage_of_basic # Default fallback
+                if deduction_obj.deduction_type == Deduction.DeductionType.FIXED:
+                    # If Fixed, use limit_per_month as the PayGrade's default value
+                    default_value = deduction_obj.limit_per_month or Decimal('0.00')
                     
                 PayGradeDeduction.objects.create(
                     pay_grade=pay_grade_instance, 
                     deduction=deduction_obj, 
                     value=default_value # Inject the default value
                 )
+    @transaction.atomic
+    def save(self, **kwargs):
+        
+        # Separate M2M data before calling super().save()
+        allowances_data = self.validated_data.pop('allowances_to_add', None)
+        deductions_data = self.validated_data.pop('deductions_to_add', None)
 
+        # 1. Main instance ko create/update karein (Basic salary aur basic fields save ho jayenge)
+        # super().save() calls create() or update()
+        instance = super().save(**kwargs)
 
-    def create(self, validated_data):
-        allowances_data = validated_data.pop('allowances_to_add', [])
-        deductions_data = validated_data.pop('deductions_to_add', [])
+        # 2. M2M (Allowances and Deductions) ko set/update karein
+        is_update = bool(self.instance)
+        self._create_update_m2m(instance, allowances_data, deductions_data, is_update=is_update)
         
-        # Calculate and set basic salary
-        gross_salary = validated_data.get('gross_salary', Decimal(0))
-        percentage = validated_data.get('percentage_of_basic_g', Decimal(0))
-        validated_data['basic_salary'] = self.calculate_basic_salary(gross_salary, percentage)
+        # 3. Final Calculation & Storage
+        # Basic salary instance se ya validated_data se fetch karein
+        basic_salary_for_calc = self.validated_data.get('basic_salary', instance.basic_salary) 
         
-        pay_grade = MonthlyPayGrade.objects.create(**validated_data)
+        gross, net, _, _ = self.calculate_salaries(instance, basic_salary_for_calc)
         
-        # Create nested M2M records using the helper function
-        self._create_update_m2m(pay_grade, allowances_data, deductions_data, is_update=False)
+        # Gross aur Net ko database mein store karein
+        instance.gross_salary = gross
+        instance.net_salary = net
+        # Sirf calculated fields ko update karein (Performance optimization)
+        instance.save(update_fields=['gross_salary', 'net_salary']) 
             
-        return pay_grade
-    
-    def update(self, instance, validated_data):
-        allowances_data = validated_data.pop('allowances_to_add', None)
-        deductions_data = validated_data.pop('deductions_to_add', None)
-
-        # 1. Calculate Basic Salary before updating the main instance
-        gross_salary = validated_data.get('gross_salary', instance.gross_salary)
-        percentage = validated_data.get('percentage_of_basic_g', instance.percentage_of_basic_g)
-        validated_data['basic_salary'] = self.calculate_basic_salary(gross_salary, percentage)
-        
-        # 2. Update the main MonthlyPayGrade instance fields 
-        instance = super().update(instance, validated_data)
-
-        # 3. Update nested M2M tables (PayGradeAllowance & PayGradeDeduction)
-        self._create_update_m2m(instance, allowances_data, deductions_data, is_update=True)
-                
         return instance
     
 class HourlyPayGradeSerializer(serializers.ModelSerializer):
@@ -942,8 +995,8 @@ class LateDeductionRuleSerializer(serializers.ModelSerializer):
 
 class TaxRuleSerializer(serializers.ModelSerializer):
     """ 
-    Serializer for Tax Rule Setup, including auto-calculation of 
-    Taxable Amount based on the previous slab limit. 
+    Serializer for Tax Rule Setup. Does NOT perform fixed tax calculation
+    during save to avoid race conditions in bulk updates.
     """
     
     class Meta:
@@ -954,59 +1007,73 @@ class TaxRuleSerializer(serializers.ModelSerializer):
             'slab_type',
             'total_income_limit',
             'tax_rate_percentage',
-            'taxable_amount_fixed',
+            'taxable_amount_fixed', # Is field ko PUT/POST mein allow karein (ya ignore)
             'is_active',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'taxable_amount_fixed'] # Read-only for safety
 
-    def calculate_fixed_tax(self, gender, current_limit, tax_rate_percent):
-        """ 
-        Calculates the fixed taxable amount for the current slab by querying the previous slab's limit.
-        """
-        
-        # 1. Previous Slab ki limit dhoondhna
-        # Filter: Same gender, aur income limit current limit se kam ho.
-        previous_rules = TaxRule.objects.filter(
-            gender=gender,
-            total_income_limit__lt=current_limit
-        ).order_by('-total_income_limit')
-        
-        previous_limit = Decimal('0.00')
-        if previous_rules.exists():
-            # Pichle sabse bade rule ki limit. Agar 'First' slab hai, to yeh 0 rahega.
-            previous_limit = previous_rules.first().total_income_limit
-        
-        # 2. Calculation
-        taxable_income_in_slab = current_limit - previous_limit
-        
-        # Fixed Tax = (Income in Slab * Tax Rate) / 100
-        fixed_tax = (taxable_income_in_slab * tax_rate_percent) / 100
-        return fixed_tax
+    # Custom create/update methods ki ab zaroorat nahi hai.
 
-    def save_taxable_amount(self, validated_data):
-        """ Calculates Taxable Amount before saving/updating. """
+# Helper Serializer for Input Validation
+class MonthlySalaryFilterSerializer(serializers.Serializer):
+    """Input validation for Month (YYYY-MM)."""
+    month = serializers.CharField(help_text="Month in YYYY-MM format.")
+    
+    def validate_month(self, value):
+        try:
+            # We store the first day of the month as the payment_month
+            return datetime.strptime(value, '%Y-%m').date().replace(day=1)
+        except ValueError:
+            raise serializers.ValidationError("Month must be in YYYY-MM format.")
         
-        current_limit = validated_data.get('total_income_limit')
-        tax_rate = validated_data.get('tax_rate_percentage')
-        gender = validated_data.get('gender')
-        slab_type = validated_data.get('slab_type')
+# Helper Serializer for Breakdown List
+class PaySlipDetailItemSerializer(serializers.ModelSerializer):
+    """Individual breakdown items ke liye."""
+    class Meta:
+        model = PaySlipDetail
+        fields = ['item_name', 'amount']
         
-        # 'Remaining Total Income' slab ke liye, fixed tax 0 hoga.
-        if slab_type == SlabChoices.REMAINING:
-             validated_data['taxable_amount_fixed'] = 0.00
-        else:
-            # Fixed tax calculate karein
-            calculated_tax = self.calculate_fixed_tax(gender, current_limit, tax_rate)
-            validated_data['taxable_amount_fixed'] = calculated_tax
-            
-        return validated_data
-
-    def create(self, validated_data):
-        """ Create method ko override kiya taaki calculation ho sake. """
-        validated_data = self.save_taxable_amount(validated_data)
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        """ Update method ko override kiya taaki calculation ho sake. """
-        validated_data = self.save_taxable_amount(validated_data)
-        return super().update(instance, validated_data)
+# Main Output Serializer for PaySlip Detail (salary03.png)
+class PaySlipDetailSerializer(serializers.ModelSerializer):
+    """
+    Final PaySlip Detail (salary03.png) ke liye.
+    """
+    
+    # Profile Details (Source path adjust karein agar employee.profile relation alag hai)
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
+    department = serializers.CharField(source='employee.profile.department.name', read_only=True)
+    designation = serializers.CharField(source='employee.profile.designation.name', read_only=True)
+    
+    per_day_salary = serializers.SerializerMethodField()
+    allowance_breakdown = serializers.SerializerMethodField()
+    deduction_breakdown = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = PaySlip
+        fields = [
+            'id', 'employee_name', 'department', 'designation', 'payment_month', 
+            'total_days_in_month', 
+            'working_days', # Total PAID Days
+            'unjustified_absence', # Total UNPAID Days
+            'late_attendance_count','total_overtime_pay',      
+            'total_tax_deduction',
+            'basic_salary', 'total_allowances', 'total_deductions', 'gross_salary', 'net_salary',
+            'per_day_salary', 'status', 'allowance_breakdown', 'deduction_breakdown'
+        ]
+        
+    def get_per_day_salary(self, obj):
+        """ Calculate Master Basic Salary per Paid Day for Pro-rata visibility. """
+        pay_grade = obj.employee.profile.monthly_pay_grade
+        if pay_grade and obj.total_days_in_month and obj.total_days_in_month > 0:
+            # Master Basic (Ideal) ka per day rate dikhana, jiss rate par cut laga hai
+            return round(pay_grade.basic_salary / obj.total_days_in_month, 2) 
+        return 0.00
+        
+    def get_allowance_breakdown(self, obj):
+        allowances = obj.details.filter(item_type='Allowance')
+        return PaySlipDetailItemSerializer(allowances, many=True).data
+        
+    def get_deduction_breakdown(self, obj):
+        # PaySlipDetail mein sabhi deductions aur cuts shamil hain
+        deductions = obj.details.filter(item_type='Deduction')
+        return PaySlipDetailItemSerializer(deductions, many=True).data

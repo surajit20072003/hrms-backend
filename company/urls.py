@@ -7,7 +7,7 @@ WorkShiftListCreateAPIView,WorkShiftDetailAPIView, ManualAttendanceView,DailyAtt
 MonthlyPayGradeDetailView,MonthlyPayGradeListCreateView,HourlyPayGradeListCreateView,HourlyPayGradeDetailView,DeductionListCreateView,DeductionDetailView,PerformanceCategoryListCreateAPIView,PerformanceCategoryDetailAPIView,\
 PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView,\
 TrainingTypeDetailAPIView,TrainingTypeListCreateAPIView,EmployeeTrainingListCreateAPIView,EmployeeTrainingDetailAPIView,EmployeeTrainingReportAPIView,AwardListCreateAPIView,AwardDetailAPIView,NoticeListCreateAPIView,\
-NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView
+NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView,SinglePaySlipGenerateRetrieveAPIView,MonthlySalarySheetView
 urlpatterns = [
     # URL for listing and creating departments
     # GET, POST -> /api/company/departments/
@@ -27,11 +27,9 @@ urlpatterns = [
     path('warnings/', WarningListCreateView.as_view(), name='warning-list-create'),
     path('warnings/<int:pk>/', WarningDetailView.as_view(), name='warning-detail'),
     path('terminations/', TerminationListCreateView.as_view(), name='termination-list-create'),
-    
-    # URL for retrieving (GET), updating (PUT), or deleting (DELETE) a specific termination
     path('terminations/<int:pk>/', TerminationDetailView.as_view(), name='termination-detail'),
     path('promotions/', PromotionListCreateView.as_view(), name='promotion-list-create'),
-    
+
     path('promotions/<int:pk>/', PromotionDetailView.as_view(), name='promotion-detail'),
     path('employees/<int:pk>/update-status/', EmployeeJobStatusUpdateView.as_view(), name='employee-update-status'),
 
@@ -127,10 +125,15 @@ urlpatterns = [
 
 
     path('setup/late-configuration/',LateDeductionRuleListCreateAPIView.as_view(), name='late-rule-list-create-api'),
-    path('setup/late-configuration/<int:pk>/',LateDeductionRuleRetrieveUpdateDestroyAPIView.as_view(),name='late-rule-crud-api'),\
+    path('setup/late-configuration/<int:pk>/',LateDeductionRuleRetrieveUpdateDestroyAPIView.as_view(),name='late-rule-crud-api'),
     
     path('setup/tax-rules/', TaxRuleSetupAPIView.as_view(),name='tax-rule-setup'),
 
+
+    path('payslip/generate/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-generate'),
+    # GET: Retrieves a specific payslip record by ID
+    path('payslip/<int:pk>/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-retrieve'),
+    path('sheet/list/', MonthlySalarySheetView.as_view(), name='monthly-salary-sheet-list'),
 
 ]
 
