@@ -1295,18 +1295,6 @@ def calculate_attendance_status_and_times(attendance_record, employee_profile):
 
     return total_work_duration, is_late_calculated, late_duration, overtime_duration
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from django.shortcuts import get_object_or_404
-from datetime import timedelta
-# Assuming your user/profile/attendance models and serializers are imported correctly
-# from ..models import User, Profile, Attendance, ...
-# from ..serializers import ManualAttendanceInputSerializer, ManualAttendanceFilterSerializer, ...
-# from .utils import calculate_attendance_status_and_times, format_duration # Ensure these imports are correct
-
-# Ensure calculate_attendance_status_and_times is implemented as per the last fix:
-# (Late calculation only needs punch_in, Overtime needs both punch_in and punch_out)
 
 class ManualAttendanceView(APIView):
     """

@@ -186,7 +186,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
         model = Profile
         # We still use '__all__' but the explicit fields defined above override the default behavior.
         # We must ensure to exclude 'user' as before.
-        fields = '__all__' 
+        #fields = '__all__' 
         exclude = ['user']
         
 
