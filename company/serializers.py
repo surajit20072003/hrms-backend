@@ -41,17 +41,23 @@ class ExperienceSerializer(serializers.ModelSerializer):
         fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility']
 
 
-# This is the main serializer for an Admin to create a new Employee
+from django.contrib.auth import get_user_model
+from rest_framework import serializers
+
+User = get_user_model() # Assuming User model is fetched correctly
+
 class EmployeeCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new User and their related Profile object.
-    It handles nested fields like email, password, and role for User creation.
+    It handles nested fields like email, password, and role for User creation,
+    and includes validation for unique email and pay grade logic.
     """
     # Fields for creating the User object
     email = serializers.EmailField(write_only=True, required=True)
     password = serializers.CharField(write_only=True, required=True)
     role = serializers.CharField(write_only=True, required=True)
     
+    # PrimaryKeyRelatedField definitions (unchanged, just added them back for context)
     work_shift = serializers.PrimaryKeyRelatedField(
         queryset=WorkShift.objects.all(), 
         allow_null=True, 
@@ -78,6 +84,35 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
             'hourly_pay_grade', 'emergency_contact', 'work_shift'
         ]
 
+    def validate(self, data):
+        # 1. Email Uniqueness Check
+        email = data.get('email')
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError({"email": "User with this email already exists."})
+
+        # 2. Required Role Check (assuming only specific roles are allowed)
+        role = data.get('role')
+        allowed_roles = [role[1] for role in User.Role.choices] # Assuming User.Role is a Choices class
+        if role not in allowed_roles:
+             raise serializers.ValidationError({"role": f"Invalid role specified. Must be one of: {', '.join(allowed_roles)}."})
+
+        # 3. Pay Grade Check (Mandatory Rule: Either Monthly OR Hourly, not both)
+        monthly_pay_grade = data.get('monthly_pay_grade')
+        hourly_pay_grade = data.get('hourly_pay_grade')
+
+        if monthly_pay_grade and hourly_pay_grade:
+            raise serializers.ValidationError(
+                {"pay_grade": "An employee cannot be assigned both Monthly and Hourly pay grades."}
+            )
+        
+        # Optional: Agar Pay Grade field required hai, toh yahaan check karein
+        if not monthly_pay_grade and not hourly_pay_grade:
+             raise serializers.ValidationError(
+                 {"pay_grade": "Either a Monthly or Hourly pay grade must be assigned."}
+             )
+            
+        return data
+
     def create(self, validated_data):
         # Step 0: Separate User data (pop writes only fields)
         email = validated_data.pop('email')
@@ -89,6 +124,7 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
         last_name = validated_data.get('last_name', '')
 
         # Step 1: Create the User object
+
         user_obj = User.objects.create_user(
             email=email, 
             password=password, 
@@ -97,8 +133,7 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
             last_name=last_name
         )
 
-        # Step 2: Create the Profile object (validated_data now contains all Profile fields, 
-        # including the WorkShift object due to PrimaryKeyRelatedField)
+ 
         profile = Profile.objects.create(user=user_obj, **validated_data)
         
         return profile
