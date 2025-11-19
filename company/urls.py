@@ -7,7 +7,7 @@ WorkShiftListCreateAPIView,WorkShiftDetailAPIView, ManualAttendanceView,DailyAtt
 MonthlyPayGradeDetailView,MonthlyPayGradeListCreateView,HourlyPayGradeListCreateView,HourlyPayGradeDetailView,DeductionListCreateView,DeductionDetailView,PerformanceCategoryListCreateAPIView,PerformanceCategoryDetailAPIView,\
 PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView,\
 TrainingTypeDetailAPIView,TrainingTypeListCreateAPIView,EmployeeTrainingListCreateAPIView,EmployeeTrainingDetailAPIView,EmployeeTrainingReportAPIView,AwardListCreateAPIView,AwardDetailAPIView,NoticeListCreateAPIView,\
-NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView,SinglePaySlipGenerateRetrieveAPIView,MonthlySalarySheetView
+NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView,SinglePaySlipGenerateRetrieveAPIView,MonthlySalarySheetView,ChangePasswordView
 urlpatterns = [
     # URL for listing and creating departments
     # GET, POST -> /api/company/departments/
@@ -134,6 +134,7 @@ urlpatterns = [
     # GET: Retrieves a specific payslip record by ID
     path('payslip/<int:pk>/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-retrieve'),
     path('sheet/list/', MonthlySalarySheetView.as_view(), name='monthly-salary-sheet-list'),
+    path('change-password/', ChangePasswordView.as_view(), name='change-password'),
 
 ]
 

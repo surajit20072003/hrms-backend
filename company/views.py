@@ -16,7 +16,7 @@ from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplic
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
 EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
-PaySlipDetailSerializer,MonthlySalaryFilterSerializer
+PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer
 
 from datetime import date
 from django.db import transaction
@@ -1225,16 +1225,13 @@ def format_duration(duration):
     minutes = (total_seconds % 3600) // 60
     return f"{hours:02d}:{minutes:02d}"
 
-
-
 def calculate_attendance_status_and_times(attendance_record, employee_profile):
     """
     Calculates derived attendance fields (duration, is_late, late_duration, overtime_duration)
-    with Timezone Awareness. Handles Late Calculation even if only Punch In is available.
+    with Timezone Awareness, handling night shift logic for correct overtime calculation.
     """
     punch_in = attendance_record.punch_in_time
     punch_out = attendance_record.punch_out_time
-    # attendance_date = attendance_record.attendance_date # Not used directly for combination (Date Mismatch Fix)
     work_shift = employee_profile.work_shift
     
     total_work_duration = None
@@ -1242,22 +1239,20 @@ def calculate_attendance_status_and_times(attendance_record, employee_profile):
     late_duration = timedelta(0) 
     overtime_duration = timedelta(0)
 
-    # Only calculate if a work shift is available
-    if work_shift and punch_in: # Base condition changed to check only for punch_in
+    # Only calculate if a work shift is available and punch in exists
+    if work_shift and punch_in:
 
         local_tz = timezone.get_current_timezone() 
         
-        # Get the reliable date from the local-converted PUNCH IN time
+        # Get the reliable date from the local-converted PUNCH IN time (Used for Late calculation)
         comparison_date = punch_in.astimezone(local_tz).date() 
 
         # --- Late Calculation (Independent of Punch Out) ---
         late_count_time = work_shift.late_count_time
         if late_count_time:
-            # Shift time ko Local Timezone mein Aware banayein (Using comparison_date)
             late_count_dt_naive = datetime.combine(comparison_date, late_count_time) 
             late_count_dt_local = timezone.make_aware(late_count_dt_naive, timezone=local_tz)
             
-            # Punch-in time ko Local Timezone mein convert karein
             punch_in_local = punch_in.astimezone(local_tz)
             
             if punch_in_local > late_count_dt_local:
@@ -1267,34 +1262,37 @@ def calculate_attendance_status_and_times(attendance_record, employee_profile):
 
         # --- Duration and Overtime Calculation (Requires Punch Out) ---
         if punch_out and punch_out > punch_in:
-            total_work_duration = punch_out - punch_in # Total duration is calculated using aware times
+            total_work_duration = punch_out - punch_in
             
+            shift_start_time = work_shift.start_time
             shift_end_time = work_shift.end_time
             ot_delay_minutes = getattr(work_shift, 'ot_start_delay_minutes', 0)
             
-            # 1. Shift end time ko Local Timezone mein Aware banayein (Using comparison_date)
-            shift_end_dt_naive = datetime.combine(comparison_date, shift_end_time) 
+            # 1. Shift End Date Calculation (NIGHT SHIFT FIX) 🚀
+            
+            # Start with the Punch In Date
+            shift_end_date = punch_in.astimezone(local_tz).date()
+            
+            # Check for Night Shift: If Shift End Time is EARLIER than Shift Start Time, add one day.
+            if shift_end_time < shift_start_time:
+                shift_end_date += timedelta(days=1)
+                
+            # 2. Shift End DT Creation using the CORRECTED date
+            shift_end_dt_naive = datetime.combine(shift_end_date, shift_end_time) 
             shift_end_dt_local = timezone.make_aware(shift_end_dt_naive, timezone=local_tz)
             
-            # 2. Calculate Actual OT Start Time (Shift End + Delay)
+            # 3. Calculate Actual OT Start Time (Shift End + Delay)
             actual_ot_start_dt_local = shift_end_dt_local + timedelta(minutes=ot_delay_minutes)
             
-            # 3. Punch-out time ko Local Timezone mein convert karein
+            # 4. Punch-out time ko Local Timezone mein convert karein
             punch_out_local = punch_out.astimezone(local_tz)
             
-            # 4. Compare punch_out with Actual OT Start Time
+            # 5. Compare punch_out with Actual OT Start Time
             if punch_out_local > actual_ot_start_dt_local:
                  duration_diff = punch_out_local - actual_ot_start_dt_local
                  overtime_duration = max(timedelta(0), duration_diff)
-        
-        # Note on One Time Punch:
-        # If punch_in exists but punch_out does not, total_work_duration and overtime_duration 
-        # will remain None/timedelta(0), indicating partial attendance/no completion. 
-        # The view (ManualAttendanceView.patch) should check if punch_in exists but punch_out does not,
-        # and update a status field (e.g., attendance_record.status = 'Partial Punch') if required.
 
     return total_work_duration, is_late_calculated, late_duration, overtime_duration
-
 
 class ManualAttendanceView(APIView):
     """
@@ -3130,3 +3128,27 @@ class MonthlySalarySheetView(APIView):
             })
 
         return paginator.get_paginated_response(output)
+
+
+class ChangePasswordView(APIView):
+    """
+    Allows a logged-in user to change their password via POST request.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        # Serializer को context में request pass करें
+        serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+        
+        if serializer.is_valid():
+            user = request.user
+            new_password = serializer.validated_data.get('new_password')
+            user.set_password(new_password)
+            user.save()
+            
+            return Response(
+                {"message": "Password changed successfully. Please log in again with your new password."},
+                status=status.HTTP_200_OK
+            )
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

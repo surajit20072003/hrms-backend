@@ -41,10 +41,7 @@ class ExperienceSerializer(serializers.ModelSerializer):
         fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility']
 
 
-from django.contrib.auth import get_user_model
-from rest_framework import serializers
 
-User = get_user_model() # Assuming User model is fetched correctly
 
 class EmployeeCreateSerializer(serializers.ModelSerializer):
     """
@@ -90,11 +87,11 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=email).exists():
             raise serializers.ValidationError({"email": "User with this email already exists."})
 
-        # 2. Required Role Check (assuming only specific roles are allowed)
-        role = data.get('role')
-        allowed_roles = [role[1] for role in User.Role.choices] # Assuming User.Role is a Choices class
-        if role not in allowed_roles:
-             raise serializers.ValidationError({"role": f"Invalid role specified. Must be one of: {', '.join(allowed_roles)}."})
+        # # 2. Required Role Check (assuming only specific roles are allowed)
+        # role = data.get('role')
+        # allowed_roles = [role[1] for role in User.Role.choices] # Assuming User.Role is a Choices class
+        # if role not in allowed_roles:
+        #      raise serializers.ValidationError({"role": f"Invalid role specified. Must be one of: {', '.join(allowed_roles)}."})
 
         # 3. Pay Grade Check (Mandatory Rule: Either Monthly OR Hourly, not both)
         monthly_pay_grade = data.get('monthly_pay_grade')
@@ -1112,3 +1109,49 @@ class PaySlipDetailSerializer(serializers.ModelSerializer):
         # PaySlipDetail mein sabhi deductions aur cuts shamil hain
         deductions = obj.details.filter(item_type='Deduction')
         return PaySlipDetailItemSerializer(deductions, many=True).data
+    
+
+
+
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """
+    Serializer for the password change endpoint.
+    Validates old password correctness and new password matching.
+    """
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True)
+    confirm_password = serializers.CharField(required=True, write_only=True)
+
+    def validate(self, data):
+        """
+        Validate new password confirmation.
+        """
+        new_password = data.get('new_password')
+        confirm_password = data.get('confirm_password')
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError(
+                {"confirm_password": "New passwords must match."}
+            )
+            
+        # Optional: Add password complexity/length checks
+        if len(new_password) < 8:
+             raise serializers.ValidationError(
+                {"new_password": "New password must be at least 8 characters long."}
+            )
+            
+        return data
+
+    def validate_old_password(self, value):
+        """
+        Check if the old password matches the user's current password.
+        """
+        user = self.context.get('request').user
+        
+        # Check if the provided old password matches the stored password
+        if not user.check_password(value):
+            raise serializers.ValidationError("Old password is not correct.")
+            
+        return value
