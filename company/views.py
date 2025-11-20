@@ -16,7 +16,7 @@ from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplic
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
 EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
-PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer
+PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer
 
 from datetime import date
 from django.db import transaction
@@ -28,6 +28,8 @@ from django.utils import timezone
 from django.db.models import Prefetch
 from decimal import Decimal
 from .pagination import StandardResultsSetPagination
+import csv
+import io
 
 class DepartmentListCreateView(APIView):
     """
@@ -888,7 +890,7 @@ class ApplyForLeaveView(APIView):
     def get(self, request):
         employee = request.user
         
-        # 1. 🎯 FIX: LeaveBalance table se saare balance records fetch karein
+        # 1.  FIX: LeaveBalance table se saare balance records fetch karein
         balance_records = LeaveBalance.objects.filter(employee=employee)
         
         balance_data = []
@@ -1092,7 +1094,7 @@ class LeaveReportBaseView(APIView):
 
 class EmployeeLeaveReportView(LeaveReportBaseView):
     """ 1. Report: Detailed list of applications for one or all employees"""
-    permission_classes = [IsAdminUser] # Admin/Manager hi is report ko dekh sakta hai
+    permission_classes = [IsAdminUser] 
     
     def get(self, request):
         # Admin can filter by employee_id or see all
@@ -3152,3 +3154,165 @@ class ChangePasswordView(APIView):
             )
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+
+
+
+
+class CSVAttendanceUploadView(APIView):
+    """
+    Handles bulk attendance upload via CSV file.
+    Expects columns: employee_id, target_date (YYYY-MM-DD), punch_in_time (HH:MM:SS), punch_out_time (HH:MM:SS)
+    """
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        if 'file' not in request.FILES:
+            return Response({"error": "No file was submitted. Please upload a file with the key 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        csv_file = request.FILES['file']
+        if not csv_file.name.endswith('.csv'):
+            return Response({"error": "File must be a CSV format."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Decode file contents using 'utf-8' and handle IO
+            file_data = csv_file.read().decode("utf-8")
+        except UnicodeDecodeError:
+            return Response({"error": "File encoding issue. Please ensure the file is saved as UTF-8."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        io_string = io.StringIO(file_data)
+        
+        # Skip the header row (assuming the first row is the header)
+        try:
+             next(io_string) 
+        except StopIteration:
+             return Response({"error": "The uploaded CSV file is empty."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reader = csv.reader(io_string)
+        
+        successful_records = []
+        failed_records = []
+        
+        # Use transaction.atomic for database integrity
+        with transaction.atomic():
+            for i, row in enumerate(reader):
+                row_number = i + 2 # Accounting for 0-based index and header row
+
+                # Check if row has expected number of fields (Employee ID, Date, In, Out)
+                if len(row) < 4:
+                    failed_records.append({"row": row_number, "error": "Missing required data (expected at least 4 columns)."})
+                    continue
+                
+                # Strip whitespace from fields
+                row = [item.strip() for item in row]
+                
+                # Prepare data structure for serializer validation
+                data = {
+                    'employee_id': row[0],
+                    'target_date': row[1],
+                    'punch_in_time': row[2] if row[2] else None, # Handle blank time strings
+                    'punch_out_time': row[3] if row[3] else None,
+                }
+                
+                serializer = CSVAttendanceInputSerializer(data=data)
+                
+                if not serializer.is_valid():
+                    failed_records.append({"row": row_number, "employee_id": row[0], "errors": serializer.errors})
+                    continue
+                
+                validated_data = serializer.validated_data
+                
+                # --- Database Lookup ---
+                emp_id_str = validated_data['employee_id']
+                target_date = validated_data['target_date']
+                punch_in_str = validated_data['punch_in_time']
+                punch_out_str = validated_data['punch_out_time']
+                
+                try:
+                    # Lookup Profile by the string employee_id (Fingerprint/Emp No.)
+                    employee_profile = Profile.objects.select_related('user', 'work_shift').get(employee_id=emp_id_str)
+                    employee = employee_profile.user
+                except Profile.DoesNotExist:
+                    failed_records.append({"row": row_number, "employee_id": emp_id_str, "error": "Employee ID (fingerprint number) not found."})
+                    continue
+                
+                
+                # --- Timezone Aware Datetime Creation ---
+                punch_in, punch_out = None, None
+                local_tz = timezone.get_current_timezone()
+
+                if punch_in_str:
+                    try:
+                        # Combine validated date (Date object) with validated time string
+                        punch_in_dt_naive = datetime.combine(target_date, datetime.strptime(punch_in_str, "%H:%M:%S").time())
+                        punch_in = timezone.make_aware(punch_in_dt_naive, timezone=local_tz)
+                    except ValueError as e:
+                         failed_records.append({"row": row_number, "employee_id": emp_id_str, "error": f"Error parsing Punch In Time: {e}"})
+                         continue
+
+                if punch_out_str:
+                    try:
+                        punch_out_dt_naive = datetime.combine(target_date, datetime.strptime(punch_out_str, "%H:%M:%S").time())
+                        punch_out = timezone.make_aware(punch_out_dt_naive, timezone=local_tz)
+                    except ValueError as e:
+                         failed_records.append({"row": row_number, "employee_id": emp_id_str, "error": f"Error parsing Punch Out Time: {e}"})
+                         continue
+
+                
+                # --- Get or Create Attendance Record ---
+                attendance_record, created = Attendance.objects.get_or_create(
+                    employee=employee,
+                    attendance_date=target_date,
+                    # Provide defaults for fields only when creating
+                    defaults={'punch_in_time': punch_in, 'punch_out_time': punch_out}
+                )
+                
+                # Update times if record already existed or was just created
+                attendance_record.punch_in_time = punch_in
+                attendance_record.punch_out_time = punch_out
+                    
+                # --- Re-run Calculation and Save (Same logic as ManualAttendanceView.patch) ---
+                if punch_in:
+                    
+                    # Basic validation: Punch Out must be after Punch In
+                    if punch_out and punch_out <= punch_in:
+                        failed_records.append({"row": row_number, "employee_id": emp_id_str, "error": "Punch Out Time must be after Punch In Time."})
+                        continue
+
+                    # Call the fixed calculation function
+                    (total_work_duration, is_late_calculated, late_duration, overtime_duration) = \
+                        calculate_attendance_status_and_times(attendance_record, employee_profile)
+
+                    # Update fields based on calculation
+                    attendance_record.total_work_duration = total_work_duration
+                    attendance_record.overtime_duration = overtime_duration
+                    attendance_record.late_duration = late_duration
+                    attendance_record.is_late = is_late_calculated
+                    attendance_record.is_present = True
+                    attendance_record.status = 'Completed' if punch_out else 'Single Punch'
+                else:
+                    # If punch-in is missing/removed, mark absent
+                    attendance_record.total_work_duration = None
+                    attendance_record.overtime_duration = timedelta(0)
+                    attendance_record.late_duration = timedelta(0)
+                    attendance_record.is_present = False
+                    attendance_record.is_late = False
+                    attendance_record.status = 'Absent'
+
+                attendance_record.save()
+                successful_records.append(f"Row {row_number} (ID: {emp_id_str})")
+
+        # --- Final Response ---
+        response_message = {
+            "status": "partial_success" if failed_records else "success",
+            "message": f"Successfully processed {len(successful_records)} records. {len(failed_records)} records failed.",
+            "successful_rows_count": len(successful_records),
+            "failed_records_count": len(failed_records),
+            "failed_records": failed_records
+        }
+        
+        if failed_records:
+            return Response(response_message, status=status.HTTP_207_MULTI_STATUS) 
+        
+        return Response(response_message, status=status.HTTP_200_OK)

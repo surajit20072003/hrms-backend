@@ -163,6 +163,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'date_of_joining',
             'status',
             'job_status',
+            'work_shift'
         ]
 
     def get_name(self, obj):
@@ -186,7 +187,7 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     education = EducationSerializer(many=True, read_only=True)
     experience = ExperienceSerializer(many=True, read_only=True)
     
-    # --- Pay Grade & Work Shift (Explicit Definition for Input/Output) ---
+    
     
     # Work Shift Handling (Input: ID, Output: ID + Name)
     work_shift = serializers.PrimaryKeyRelatedField( 
@@ -1155,3 +1156,44 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError("Old password is not correct.")
             
         return value
+    
+
+
+
+
+class CSVAttendanceInputSerializer(serializers.Serializer):
+    """ 
+    Used to validate a single row from the CSV file. 
+    Fields correspond to columns in the CSV.
+    """
+    
+    # Employee ID is the string/fingerprint ID from Profile model
+    employee_id = serializers.CharField(required=True, max_length=50) 
+    
+    # Date must be YYYY-MM-DD
+    target_date = serializers.DateField(format="%Y-%m-%d", input_formats=['%Y-%m-%d'])
+    
+    # Times are validated as strings (HH:MM:SS) before combining with date in the view
+    punch_in_time = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=25)
+    punch_out_time = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=25)
+    
+    def validate(self, data):
+        punch_in = data.get('punch_in_time')
+        punch_out = data.get('punch_out_time')
+
+        # Custom check for time format (HH:MM:SS)
+        def check_time_format(time_str):
+            if time_str:
+                try:
+                    datetime.strptime(time_str, "%H:%M:%S")
+                except ValueError:
+                    return False
+            return True
+
+        if punch_in and not check_time_format(punch_in):
+            raise serializers.ValidationError({"punch_in_time": "Time must be in HH:MM:SS format."})
+        
+        if punch_out and not check_time_format(punch_out):
+            raise serializers.ValidationError({"punch_out_time": "Time must be in HH:MM:SS format."})
+            
+        return data

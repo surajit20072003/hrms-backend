@@ -95,14 +95,37 @@ class ExperienceSerializer(serializers.ModelSerializer):
         model = Experience
         exclude = ['profile']
 
+
 class PersonalInfoSerializer(serializers.ModelSerializer):
+
+    
     class Meta:
         model = Profile
         fields = [
-            'full_name', 'phone', 'address', 'date_of_joining', 'date_of_birth',
-            'gender', 'religion', 'marital_status'
+            # Personal Info
+            'first_name', 'last_name', 'full_name', 'phone', 'address', 
+            'date_of_birth', 'gender', 'religion', 'marital_status',
+            'emergency_contact', 'photo',
+            
+            # Employment Info (IDs for updates, read-only for display)
+            'employee_id', 'date_of_joining', 'date_of_leaving',
+            'status', 'job_status', 
+            
+            # Foreign Key IDs (Read/Write for updates, requires corresponding fields in Profile model)
+            'department', 
+            'designation', 
+            'branch', 
+            'supervisor', 
+            'work_shift',
+            'monthly_pay_grade', 
+            'hourly_pay_grade',
         ]
-
+        # full_name is a property, so mark it read_only
+        read_only_fields = ['full_name', 'employee_id', 'date_of_leaving', 'date_of_joining'] 
+        
+# ==========================
+# UserProfileSerializer (Remains the same, aggregates data)
+# ==========================
 class UserProfileSerializer(serializers.ModelSerializer):
     profile = PersonalInfoSerializer(read_only=True)
     education = EducationSerializer(many=True, read_only=True, source='profile.education')

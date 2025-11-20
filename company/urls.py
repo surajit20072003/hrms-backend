@@ -1,13 +1,5 @@
 from django.urls import path
-from .views import DepartmentListCreateView, DepartmentDetailView,DesignationListCreateView,DesignationDetailView,BranchListCreateView,BranchDetailView, EmployeeListView,EmployeeCreateView,EmployeeDetailView,\
-EmployeeEducationView,EmployeeExperienceView,WarningDetailView,WarningListCreateView,TerminationDetailView,TerminationListCreateView,PromotionListCreateView,PromotionDetailView, \
-EmployeeJobStatusUpdateView,HolidayListCreateView,HolidayDetailView,PublicHolidayListCreateView,PublicHolidayDetailView,WeeklyHolidayListCreateView,WeeklyHolidayDetailView,LeaveTypeListCreateView, \
-LeaveTypeDetailView,EarnLeaveRuleView,ApplyForLeaveView,MyLeaveApplicationsView,AllLeaveApplicationsView,LeaveApprovalView,EmployeeLeaveReportView,MyLeaveReportView,LeaveSummaryReportView, \
-WorkShiftListCreateAPIView,WorkShiftDetailAPIView, ManualAttendanceView,DailyAttendanceReportView,MonthlyAttendanceReportView,MyAttendanceReportView,AttendanceSummaryReportView,AllowanceListCreateView,AllowanceDetailView,\
-MonthlyPayGradeDetailView,MonthlyPayGradeListCreateView,HourlyPayGradeListCreateView,HourlyPayGradeDetailView,DeductionListCreateView,DeductionDetailView,PerformanceCategoryListCreateAPIView,PerformanceCategoryDetailAPIView,\
-PerformanceCriteriaListCreateAPIView,PerformanceCriteriaDetailAPIView,EmployeePerformanceListCreateAPIView,EmployeePerformanceDetailAPIView,PerformanceSummaryReportAPIView,JobPostListCreateAPIView,JobPostDetailAPIView,\
-TrainingTypeDetailAPIView,TrainingTypeListCreateAPIView,EmployeeTrainingListCreateAPIView,EmployeeTrainingDetailAPIView,EmployeeTrainingReportAPIView,AwardListCreateAPIView,AwardDetailAPIView,NoticeListCreateAPIView,\
-NoticeDetailAPIView,DashboardDataAPIView,LateDeductionRuleListCreateAPIView,LateDeductionRuleRetrieveUpdateDestroyAPIView,TaxRuleSetupAPIView,SinglePaySlipGenerateRetrieveAPIView,MonthlySalarySheetView,ChangePasswordView
+from .views import *
 urlpatterns = [
     # URL for listing and creating departments
     # GET, POST -> /api/company/departments/
@@ -135,8 +127,12 @@ urlpatterns = [
     path('payslip/<int:pk>/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-retrieve'),
     path('sheet/list/', MonthlySalarySheetView.as_view(), name='monthly-salary-sheet-list'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
+    
 
+    path('attendance/upload-csv/', CSVAttendanceUploadView.as_view(), name='attendance-upload-csv'),
 ]
+
+
 
 
 
