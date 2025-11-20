@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
-from users.models import Education,Experience,User,Profile
+from users.models import Education,Experience,User,Profile,Role
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
 Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,\
 PaySlip,PaySlipDetail
@@ -16,7 +16,7 @@ from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplic
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
 EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
-PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer
+PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer,RoleSerializer
 
 from datetime import date
 from django.db import transaction
@@ -228,7 +228,7 @@ class EmployeeListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-    
+        # 1. Fetch ALL Profiles (no role restriction here)
         queryset = Profile.objects.select_related(
             'user', 
             'department', 
@@ -237,9 +237,11 @@ class EmployeeListView(APIView):
             'hourly_pay_grade',
             'branch'
         ).all().order_by('first_name')
+        
+        # 2. Filtering Logic (Role filter uses iexact which is okay for text field)
         role_filter = request.query_params.get('role', None)
         if role_filter:
-            # User model ke role field par filter karein
+            # Filter works regardless of the role string used (e.g., 'Employe' or 'Admin')
             queryset = queryset.filter(user__role__iexact=role_filter)
             
         # Filter by Department ID
@@ -258,7 +260,7 @@ class EmployeeListView(APIView):
             queryset = queryset.filter(status__iexact=status_filter)
 
 
-        # 3. Search Logic (Employee Name / ID)
+        # 3. Search Logic
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
@@ -289,14 +291,13 @@ class EmployeeCreateView(APIView):
 
 class EmployeeDetailView(APIView):
     """
-    Retrieve, Update or Delete an employee's profile instance.
-    The update logic is fully handled by EmployeeDetailSerializer's custom update method.
+    Retrieve, Update or Delete an employee's profile instance for ANY role.
     """
     permission_classes = [IsAdminUser]
 
     def get_object(self, pk):
         try:
-            return Profile.objects.get(user__pk=pk, user__role=User.Role.EMPLOYEE)
+            return Profile.objects.get(user__pk=pk)
         except Profile.DoesNotExist:
             raise Http404
 
@@ -310,7 +311,6 @@ class EmployeeDetailView(APIView):
         profile = self.get_object(pk)
         serializer = EmployeeDetailSerializer(profile, data=request.data)
         if serializer.is_valid():
-            # serializer.save() calls the custom update method which handles User and WorkShift.
             serializer.save() 
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -318,10 +318,8 @@ class EmployeeDetailView(APIView):
     def patch(self, request, pk):
         """ Partially update an employee profile (User, Profile, WorkShift). """
         profile = self.get_object(pk)
-        # Use partial=True for PATCH requests
         serializer = EmployeeDetailSerializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
-            # serializer.save() calls the custom update method which handles User and WorkShift.
             serializer.save() 
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -331,7 +329,6 @@ class EmployeeDetailView(APIView):
         user_to_delete = profile.user
         user_to_delete.delete() 
         return Response({"message": "Employee deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-
 class EmployeeEducationView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -569,7 +566,7 @@ class EmployeeJobStatusUpdateView(APIView):
     def patch(self, request, pk):
         try:
             # Find the profile of the employee using their user ID (pk)
-            profile = Profile.objects.get(user__pk=pk, user__role=User.Role.EMPLOYEE)
+            profile = Profile.objects.get(user__pk=pk)
         except Profile.DoesNotExist:
             return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -1215,9 +1212,7 @@ class WorkShiftDetailAPIView(APIView):
         shift = get_object_or_404(WorkShift, pk=pk)
         shift.delete()
         return Response({"message": "Work Shift deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-
-
-# --- 1. Duration Formatting (HH:MM) ---
+    
 def format_duration(duration):
     """ Converts timedelta duration to HH:MM string, showing '00:00' for zero/None. """
     if duration is None or duration.total_seconds() <= 0:
@@ -1225,13 +1220,12 @@ def format_duration(duration):
     total_seconds = int(duration.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
-    return f"{hours:02d}:{minutes:02d}"
+    # Handle negative durations (for Deficiency calculation)
+    sign = '-' if duration.total_seconds() < 0 else ''
+    return f"{sign}{abs(hours):02d}:{abs(minutes):02d}"
 
 def calculate_attendance_status_and_times(attendance_record, employee_profile):
-    """
-    Calculates derived attendance fields (duration, is_late, late_duration, overtime_duration)
-    with Timezone Awareness, handling night shift logic for correct overtime calculation.
-    """
+    """  Calculates derived attendance fields (duration, is_late, overtime_duration). """
     punch_in = attendance_record.punch_in_time
     punch_out = attendance_record.punch_out_time
     work_shift = employee_profile.work_shift
@@ -1295,6 +1289,288 @@ def calculate_attendance_status_and_times(attendance_record, employee_profile):
                  overtime_duration = max(timedelta(0), duration_diff)
 
     return total_work_duration, is_late_calculated, late_duration, overtime_duration
+    # [End of calculate_attendance_status_and_times body]
+
+def get_expected_working_dates_list(from_date, to_date):
+    """ 
+    [NEW HELPER] Returns a list of dates between the range that are NOT a Weekly or Public Holiday. 
+    This list is used to generate the report table rows.
+    """
+    
+    weekly_offs = set(
+        WeeklyHoliday.objects.filter(is_active=True).values_list('day', flat=True)
+    )
+    public_holiday_dates = set()
+    holidays = PublicHoliday.objects.filter(
+        start_date__lte=to_date,
+        end_date__gte=from_date
+    )
+    
+    # Populate public_holiday_dates set
+    for holiday in holidays:
+        current_date = holiday.start_date
+        while current_date <= holiday.end_date and current_date <= to_date:
+            if current_date >= from_date:
+                public_holiday_dates.add(current_date)
+            current_date += timedelta(days=1)
+
+    expected_working_dates = []
+    current_date = from_date
+    while current_date <= to_date:
+        is_weekly_off = current_date.strftime('%A') in weekly_offs
+        is_public_holiday = current_date in public_holiday_dates
+        
+        # Only include the date if it's NOT a weekly off AND NOT a public holiday
+        if not is_weekly_off and not is_public_holiday:
+            expected_working_dates.append(current_date)
+            
+        current_date += timedelta(days=1)
+        
+    return expected_working_dates
+
+
+
+def calculate_summary_stats(records, expected_working_dates, employee_profile, from_date, to_date):
+    """ 
+    Aggregates attendance records and calculates all summary metrics, 
+    including accurate Total Leave count.
+    """
+    
+    # --- 1. Base Counts and Duration Aggregation (UNCHANGED) ---
+    attendance_summary = records.aggregate(
+        total_work_duration_sum=Sum('total_work_duration'),
+        overtime_duration_sum=Sum('overtime_duration'),
+        late_duration_sum=Sum('late_duration'),
+    )
+    
+    present_records = records.filter(is_present=True)
+    total_present = present_records.count()
+    total_late = present_records.filter(is_late=True).count()
+    
+    actual_work_duration = attendance_summary.get('total_work_duration_sum') or timedelta(0)
+    overtime_duration = attendance_summary.get('overtime_duration_sum') or timedelta(0)
+    total_late_duration = attendance_summary.get('late_duration_sum') or timedelta(0)
+    
+    # --- 2. Expected Working Days (Total Rows in the Report) (UNCHANGED) ---
+    total_working_days = len(expected_working_dates)
+    
+    # --- 3. Expected Hours Calculation (UNCHANGED) ---
+    expected_shift_duration = timedelta(0) 
+    if employee_profile and employee_profile.work_shift:
+        shift = employee_profile.work_shift
+        start_dt = datetime.combine(date.min, shift.start_time)
+        end_dt = datetime.combine(date.min, shift.end_time)
+        if shift.end_time < shift.start_time:
+            end_dt += timedelta(days=1) 
+        expected_shift_duration = end_dt - start_dt
+
+    expected_working_duration = expected_shift_duration * total_present
+    
+
+    
+    approved_leaves_sum = LeaveApplication.objects.filter(
+        employee=employee_profile.user,
+        status=LeaveStatus.APPROVED,
+        from_date__lte=to_date,
+        to_date__gte=from_date
+    ).aggregate(
+        total_approved_days=Sum('number_of_days')
+    )
+    
+
+    total_leave = approved_leaves_sum.get('total_approved_days') or 0.0
+
+    total_absence = total_working_days - total_present - total_leave
+    
+    deficiency = expected_working_duration - actual_work_duration
+    
+    return {
+        "Total Working Days": total_working_days,
+        "Total Present": total_present,
+        "Total Absence": max(0, total_absence),
+        "Total Leave": total_leave, # Now correct
+        "Total Late": total_late,
+        "Total Late Time": format_duration(total_late_duration),
+        "Expected Working Hour": format_duration(expected_working_duration),
+        "Actual Working Hour": format_duration(actual_work_duration),
+        "Over Time": format_duration(overtime_duration),
+        "Deficiency": format_duration(deficiency),
+    }
+
+class MyAttendanceReportView(APIView):
+    """ 
+    [MODIFIED] Employee-specific attendance report showing only expected working days 
+    and detailed summary statistics.
+    """
+    permission_classes = [IsAuthenticated] 
+    
+    def get(self, request):
+        filter_serializer = AttendanceReportFilterSerializer(data=request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        data = filter_serializer.validated_data
+        from_date = data['from_date']
+        to_date = data['to_date']
+        
+        try:
+            employee = request.user
+            employee_profile = Profile.objects.select_related('work_shift').get(user=employee)
+        except Profile.DoesNotExist:
+            return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # 1. Get ALL Attendance records for the employee within the date range
+        all_attendance_qs = Attendance.objects.filter(
+            employee=employee, 
+            attendance_date__gte=from_date, 
+            attendance_date__lte=to_date
+        )
+        attendance_records_map = {
+            record.attendance_date: record 
+            for record in all_attendance_qs
+        }
+        
+        # 2. Determine the list of dates the employee WAS EXPECTED TO WORK (excluding holidays)
+        expected_working_dates = get_expected_working_dates_list(from_date, to_date)
+        
+        # 3. Build the Daily Records Output
+        output_data = []
+        records_for_summary = [] # List to hold actual Attendance objects for aggregation
+        
+        for current_date in expected_working_dates:
+            record = attendance_records_map.get(current_date)
+            
+            if record:
+                # Case A: Attendance record exists (Present, Late, Single Punch)
+                records_for_summary.append(record)
+                
+                output_data.append({
+                    "Date": record.attendance_date,
+                    "Employee Name": employee_profile.full_name, 
+                    "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
+                    "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
+                    "Working Time": format_duration(record.total_work_duration),
+                    "Late": "Yes" if record.is_late else "No",
+                    "Late Time": format_duration(record.late_duration),       
+                    "Over Time": format_duration(record.overtime_duration),    
+                    "Status": "Present" if record.is_present else "Absent",
+                })
+            else:
+                # Case B: No Attendance record exists for an expected working day (ABSENT)
+                output_data.append({
+                    "Date": current_date,
+                    "Employee Name": employee_profile.full_name, 
+                    "In Time": '--', "Out Time": '--', 
+                    "Working Time": '00:00', "Late": 'No', 
+                    "Late Time": '00:00', "Over Time": '00:00',    
+                    "Status": "Absence",
+                })
+        
+        # 4. Calculate Summary Statistics using all_attendance_qs (for efficiency)
+        summary = calculate_summary_stats(
+            all_attendance_qs, # Pass the queryset for aggregation
+            expected_working_dates, 
+            employee_profile,
+            from_date,
+            to_date
+        )
+        
+        # 5. Return the final structured response
+        return Response({
+            "daily_records": output_data,
+            "summary": summary
+        })
+
+
+class MonthlyAttendanceReportView(APIView):
+    """ 
+    [MODIFIED] Admin/HR view showing detailed records over a date range, filterable by employee, 
+    only showing expected working days and summary.
+    """
+    permission_classes = [IsAdminUser] 
+    
+    def get(self, request):
+        filter_serializer = AttendanceReportFilterSerializer(data=request.query_params)
+        filter_serializer.is_valid(raise_exception=True)
+        data = filter_serializer.validated_data
+        from_date = data['from_date']
+        to_date = data['to_date']
+        employee_id = data.get('employee_id') 
+
+        # 1. Fetch the specific employee profile
+        try:
+            employee = User.objects.get(pk=employee_id) if employee_id else None
+            employee_profile = Profile.objects.select_related('work_shift').get(user=employee) if employee else None
+        except (User.DoesNotExist, Profile.DoesNotExist):
+            return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not employee:
+            # Admin view requires filtering by employee ID to show a summary/detailed table
+            return Response({"error": "Employee ID is required for detailed monthly report."}, 
+                            status=status.HTTP_400_BAD_REQUEST)
+
+
+        # 2. Get ALL Attendance records for the employee within the date range
+        all_attendance_qs = Attendance.objects.filter(
+            employee=employee, 
+            attendance_date__gte=from_date, 
+            attendance_date__lte=to_date
+        )
+        attendance_records_map = {
+            record.attendance_date: record 
+            for record in all_attendance_qs
+        }
+        
+        # 3. Determine the list of dates the employee WAS EXPECTED TO WORK (excluding holidays)
+        expected_working_dates = get_expected_working_dates_list(from_date, to_date)
+        
+        # 4. Build the Daily Records Output
+        output_data = []
+        
+        for current_date in expected_working_dates:
+            record = attendance_records_map.get(current_date)
+            
+            if record:
+                # Case A: Attendance record exists
+                output_data.append({
+                    "Date": record.attendance_date,
+                    "Employee Name": employee_profile.full_name,
+                    "Designation": employee_profile.designation.name if employee_profile.designation else '--',
+                    "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
+                    "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
+                    "Working Time": format_duration(record.total_work_duration),
+                    "Late": "Yes" if record.is_late else "No",
+                    "Late Time": format_duration(record.late_duration),       
+                    "Over Time": format_duration(record.overtime_duration),    
+                    "Status": "Present" if record.is_present else "Absent",
+                })
+            else:
+                # Case B: No Attendance record exists (ABSENT)
+                output_data.append({
+                    "Date": current_date,
+                    "Employee Name": employee_profile.full_name,
+                    "Designation": employee_profile.designation.name if employee_profile.designation else '--',
+                    "In Time": '--', "Out Time": '--', 
+                    "Working Time": '00:00', "Late": 'No', 
+                    "Late Time": '00:00', "Over Time": '00:00',    
+                    "Status": "Absence",
+                })
+            
+        # 5. Calculate Summary Statistics
+        summary = calculate_summary_stats(
+            all_attendance_qs, 
+            expected_working_dates, 
+            employee_profile,
+            from_date,
+            to_date
+        )
+            
+        # 6. Return the final structured response
+        return Response({
+            "daily_records": output_data,
+            "summary": summary
+        })
+
+
+
 
 class ManualAttendanceView(APIView):
     """
@@ -1497,57 +1773,6 @@ class DailyAttendanceReportView(APIView):
         return Response(output_data)
 
 
-class MyAttendanceReportView(AttendanceReportBaseView):
-    """ Employee-specific attendance report showing their own history over a date range. """
-    permission_classes = [IsAuthenticated] 
-    
-    def get(self, request):
-        records = self.get_filtered_attendance(request, employee_specific=True)
-        
-        output_data = []
-        for record in records:
-            profile = record.employee.profile
-            output_data.append({
-                "Date": record.attendance_date,
-                "Employee Name": profile.full_name, 
-                "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
-                "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
-                "Working Time": format_duration(record.total_work_duration),
-                "Late": "Yes" if record.is_late else "No",
-                "Late Time": format_duration(record.late_duration),       
-                "Over Time": format_duration(record.overtime_duration),    
-                "Status": "Present" if record.is_present else "Absent",
-            })
-
-        return Response(output_data)
-
-
-class MonthlyAttendanceReportView(AttendanceReportBaseView):
-    """ Admin/HR view showing detailed records over a date range, filterable by employee. """
-    permission_classes = [IsAdminUser] 
-    
-    def get(self, request):
-        records = self.get_filtered_attendance(request, employee_specific=False)
-        
-        output_data = []
-        for record in records:
-            profile = record.employee.profile
-                     
-            output_data.append({
-                "Date": record.attendance_date,
-                "Employee Name": profile.full_name,
-                "Designation": profile.designation.name if profile.designation else '--',
-                "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
-                "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
-                "Working Time": format_duration(record.total_work_duration),
-                "Late": "Yes" if record.is_late else "No",
-                "Late Time": format_duration(record.late_duration),       
-                "Over Time": format_duration(record.overtime_duration),    
-                "Status": "Present" if record.is_present else "Absent",
-            })
-            
-        return Response(output_data)
-
 
 
 
@@ -1571,7 +1796,7 @@ class AttendanceSummaryReportView(APIView):
         base_filters = Q(attendance_date__year=year) & Q(attendance_date__month=month)
         
         
-        base_filters &= Q(employee__role=User.Role.EMPLOYEE) 
+        base_filters &= Q(employee__is_active=True) 
         
         
         base_filters &= Q(employee__profile__isnull=False) 
@@ -3316,3 +3541,78 @@ class CSVAttendanceUploadView(APIView):
             return Response(response_message, status=status.HTTP_207_MULTI_STATUS) 
         
         return Response(response_message, status=status.HTTP_200_OK)
+    
+
+
+class RoleListView(APIView):
+    """
+    Handles GET (List all Roles) and POST (Create a new Role).
+    Access restricted to authenticated Admin users (is_staff=True).
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    # --- GET: List all Roles ---
+    def get(self, request, format=None):
+        roles = Role.objects.all().order_by('name')
+        serializer = RoleSerializer(roles, many=True)
+        return Response(serializer.data)
+
+    # --- POST: Create a new Role ---
+    def post(self, request, format=None):
+        serializer = RoleSerializer(data=request.data)
+        if serializer.is_valid():
+            # Role ko save karo
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        # Validation error hone par
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+
+class RoleDetailView(APIView):
+    """
+    Handles GET (Retrieve), PUT/PATCH (Update), and DELETE (Delete) for a single Role instance.
+    Access restricted to authenticated Admin users (is_staff=True).
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+
+    # Helper function to get the object, returns 404 if not found
+    def get_object(self, pk):
+        try:
+            return Role.objects.get(pk=pk)
+        except Role.DoesNotExist:
+            return Response({"detail": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # --- GET: Retrieve Role Detail ---
+    def get(self, request, pk, format=None):
+        role = self.get_object(pk)
+        # Check if the helper returned an error response
+        if isinstance(role, Response):
+            return role
+            
+        serializer = RoleSerializer(role)
+        return Response(serializer.data)
+
+    # --- PUT/PATCH: Update Role ---
+    def put(self, request, pk, format=None):
+        role = self.get_object(pk)
+        if isinstance(role, Response):
+            return role
+            
+        # partial=True for PATCH requests, but PUT typically uses full update
+        serializer = RoleSerializer(role, data=request.data, partial=True) 
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+            
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- DELETE: Delete Role ---
+    def delete(self, request, pk, format=None):
+        role = self.get_object(pk)
+        if isinstance(role, Response):
+            return role
+            
+        # Simple deletion as requested (no safety checks)
+        role.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

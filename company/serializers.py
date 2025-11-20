@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
 Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
 EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,PaySlip,PaySlipDetail
-from users.models import User, Profile, Education, Experience
+from users.models import User, Profile, Education, Experience,Role
 from users.enums import JobStatus,LeaveStatus,SlabChoices
 from django.db.models import Sum
 from django.db import transaction
@@ -41,20 +41,23 @@ class ExperienceSerializer(serializers.ModelSerializer):
         fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility']
 
 
-
-
 class EmployeeCreateSerializer(serializers.ModelSerializer):
     """
     Serializer for creating a new User and their related Profile object.
-    It handles nested fields like email, password, and role for User creation,
-    and includes validation for unique email and pay grade logic.
+    FIX: Role field is changed to PrimaryKeyRelatedField for dynamic assignment.
     """
     # Fields for creating the User object
     email = serializers.EmailField(write_only=True, required=True)
     password = serializers.CharField(write_only=True, required=True)
-    role = serializers.CharField(write_only=True, required=True)
     
-    # PrimaryKeyRelatedField definitions (unchanged, just added them back for context)
+    # 💥 FIX APPLIED: Role must be accepted as the ID of the Role object
+    role = serializers.PrimaryKeyRelatedField(
+        queryset=Role.objects.all(), 
+        write_only=True, 
+        required=True
+    )
+    
+    # PrimaryKeyRelatedField definitions (UNCHANGED)
     work_shift = serializers.PrimaryKeyRelatedField(
         queryset=WorkShift.objects.all(), 
         allow_null=True, 
@@ -82,18 +85,12 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, data):
-        # 1. Email Uniqueness Check
+        # 1. Email Uniqueness Check (UNCHANGED)
         email = data.get('email')
         if User.objects.filter(email=email).exists():
             raise serializers.ValidationError({"email": "User with this email already exists."})
 
-        # # 2. Required Role Check (assuming only specific roles are allowed)
-        # role = data.get('role')
-        # allowed_roles = [role[1] for role in User.Role.choices] # Assuming User.Role is a Choices class
-        # if role not in allowed_roles:
-        #      raise serializers.ValidationError({"role": f"Invalid role specified. Must be one of: {', '.join(allowed_roles)}."})
-
-        # 3. Pay Grade Check (Mandatory Rule: Either Monthly OR Hourly, not both)
+        # 3. Pay Grade Check (UNCHANGED)
         monthly_pay_grade = data.get('monthly_pay_grade')
         hourly_pay_grade = data.get('hourly_pay_grade')
 
@@ -102,7 +99,6 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
                 {"pay_grade": "An employee cannot be assigned both Monthly and Hourly pay grades."}
             )
         
-        # Optional: Agar Pay Grade field required hai, toh yahaan check karein
         if not monthly_pay_grade and not hourly_pay_grade:
              raise serializers.ValidationError(
                  {"pay_grade": "Either a Monthly or Hourly pay grade must be assigned."}
@@ -114,37 +110,39 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
         # Step 0: Separate User data (pop writes only fields)
         email = validated_data.pop('email')
         password = validated_data.pop('password')
-        role = validated_data.pop('role')
+        # 'role' is now the Role INSTANCE, not the string/ID
+        role_instance = validated_data.pop('role')
         
         # Other user data
         first_name = validated_data.get('first_name', '')
         last_name = validated_data.get('last_name', '')
 
         # Step 1: Create the User object
-
         user_obj = User.objects.create_user(
             email=email, 
             password=password, 
-            role=role,
+            # 💥 IMPORTANT: Pass the Role instance to create_user
+            role=role_instance,
             first_name=first_name,
             last_name=last_name
         )
 
- 
         profile = Profile.objects.create(user=user_obj, **validated_data)
         
         return profile
 
 
+# --- 2. EmployeeListSerializer (FIXED) ---
+
 class EmployeeListSerializer(serializers.ModelSerializer):
     # Get related fields from other models
     name = serializers.SerializerMethodField()
-    role = serializers.CharField(source='user.role', read_only=True)
+    # 💥 FIX APPLIED: Role name is read from the linked Role object
+    role = serializers.CharField(source='user.role.name', read_only=True)
     department = serializers.CharField(source='department.name', read_only=True, allow_null=True)
     designation = serializers.CharField(source='designation.name', read_only=True, allow_null=True)
     branch = serializers.CharField(source='branch.name', read_only=True, allow_null=True)
     pay_grade = serializers.SerializerMethodField()
-    # We need the user's primary key (ID) for detail/edit/delete actions
     user_id = serializers.IntegerField(source='user.id', read_only=True)
 
     class Meta:
@@ -158,7 +156,7 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'designation',
             'branch',
             'phone',
-            'employee_id', # This is Fingerprint/Emp No.
+            'employee_id', 
             'pay_grade',
             'date_of_joining',
             'status',
@@ -176,20 +174,28 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             return f"{obj.hourly_pay_grade} (Hourly)"
         return "N/A"
 
-# Assuming necessary imports: WorkShift, MonthlyPayGrade, HourlyPayGrade
 
 class EmployeeDetailSerializer(serializers.ModelSerializer):
     # --- User Data (Display/Update) ---
     email = serializers.EmailField(source='user.email')
-    role = serializers.CharField(source='user.role', read_only=True)
+    
+    
+    role_name = serializers.CharField(source='user.role.name', read_only=True)
+    
+    # 💥 FIX APPLIED (Write): Allow role to be updated by ID
+    role_id = serializers.PrimaryKeyRelatedField(
+        source='user.role', # This links to the user.role field (the FK object)
+        queryset=Role.objects.all(),
+        required=False,
+        allow_null=True,
+        write_only=True
+    )
     
     # --- Nested Read-Only Data (Assuming these exist) ---
     education = EducationSerializer(many=True, read_only=True)
     experience = ExperienceSerializer(many=True, read_only=True)
     
-    
-    
-    # Work Shift Handling (Input: ID, Output: ID + Name)
+    # Work Shift Handling (UNCHANGED)
     work_shift = serializers.PrimaryKeyRelatedField( 
         queryset=WorkShift.objects.all(), 
         allow_null=True, 
@@ -197,44 +203,47 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     )
     work_shift_name = serializers.CharField(source='work_shift.name', read_only=True)
 
-    # Monthly Pay Grade Handling (Input: ID, Output: ID + Name)
+    # Pay Grade Handling (UNCHANGED)
     monthly_pay_grade = serializers.PrimaryKeyRelatedField(
-        queryset=MonthlyPayGrade.objects.all(), 
-        allow_null=True, 
-        required=False
+        queryset=MonthlyPayGrade.objects.all(), allow_null=True, required=False
     )
     monthly_pay_grade_name = serializers.CharField(source='monthly_pay_grade.grade_name', read_only=True)
-
-    # Hourly Pay Grade Handling (Input: ID, Output: ID + Rate)
     hourly_pay_grade = serializers.PrimaryKeyRelatedField(
-        queryset=HourlyPayGrade.objects.all(), 
-        allow_null=True, 
-        required=False
+        queryset=HourlyPayGrade.objects.all(), allow_null=True, required=False
     )
-    # Assuming 'hourly_rate' is a better display field than 'grade_name' for HourlyPayGrade
     hourly_pay_grade_rate = serializers.CharField(source='hourly_pay_grade.hourly_rate', read_only=True)
 
 
     class Meta:
         model = Profile
-        # We still use '__all__' but the explicit fields defined above override the default behavior.
-        # We must ensure to exclude 'user' as before.
-        #fields = '__all__' 
         exclude = ['user']
         
 
     def update(self, instance, validated_data):
-        # 1. Handle User update 
+    
         user_data = validated_data.pop('user', {})
+        
+        # New email and role will be in user_data
+        new_email = user_data.get('email')
+        new_role_instance = user_data.get('role')
+        
         user = instance.user
-        user.email = user_data.get('email', user.email)
+        
+        # Update email
+        if new_email is not None:
+            user.email = new_email
+            
+        # Update role (if provided via role_id field)
+        if new_role_instance is not None:
+            user.role = new_role_instance
+            
         user.save()
         
-        # 2. Handle Profile update (This includes saving the new FK objects: 
-        # work_shift, monthly_pay_grade, hourly_pay_grade)
+        # 2. Handle Profile update 
         updated_instance = super().update(instance, validated_data) 
 
         return updated_instance
+
 
 class WarningSerializer(serializers.ModelSerializer):
     # For displaying names instead of IDs in GET requests
@@ -1197,3 +1206,23 @@ class CSVAttendanceInputSerializer(serializers.Serializer):
             raise serializers.ValidationError({"punch_out_time": "Time must be in HH:MM:SS format."})
             
         return data
+    
+
+
+class RoleSerializer(serializers.ModelSerializer):
+    """ Serializer for creating, listing, and managing Role objects. """
+    class Meta:
+        model = Role
+        fields = ['id', 'name', 'description']
+        read_only_fields = ['id'] 
+
+    def validate_name(self, value):
+        """ Role name should be unique (case-insensitive). """
+        queryset = Role.objects.all()
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+            
+        if queryset.filter(name__iexact=value).exists():
+            raise serializers.ValidationError({"name": "A role with this name already exists."})
+            
+        return value

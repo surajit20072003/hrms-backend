@@ -130,6 +130,13 @@ urlpatterns = [
     
 
     path('attendance/upload-csv/', CSVAttendanceUploadView.as_view(), name='attendance-upload-csv'),
+
+
+    path('roles/', RoleListView.as_view(), name='role-list-create'),
+    
+    # 2. API for Role Detail, Update, and Delete (GET, PUT/PATCH, DELETE)
+    path('roles/<int:pk>/', RoleDetailView.as_view(), name='role-detail'),
+
 ]
 
 
