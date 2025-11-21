@@ -329,35 +329,148 @@ class EmployeeDetailView(APIView):
         user_to_delete = profile.user
         user_to_delete.delete() 
         return Response({"message": "Employee deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
+    
+
 class EmployeeEducationView(APIView):
     permission_classes = [IsAdminUser]
 
+    def get_profile(self, employee_pk):
+        return Profile.objects.get(user__pk=employee_pk)
+
+    # GET: All Education + POST: New Education
+    def get(self, request, employee_pk):
+        try:
+            profile = self.get_profile(employee_pk)
+        except Profile.DoesNotExist:
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        education = profile.education.all()
+        serializer = EducationSerializer(education, many=True)
+        return Response(serializer.data)
+
     def post(self, request, employee_pk):
         try:
-            profile = Profile.objects.get(user__pk=employee_pk)
+            profile = self.get_profile(employee_pk)
         except Profile.DoesNotExist:
-            return Response({"error": "Employee profile not found."}, status=status.HTTP_404_NOT_FOUND)
-            
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
         serializer = EducationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(profile=profile)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+class EmployeeEducationDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, employee_pk, education_pk):
+        return Education.objects.get(pk=education_pk, profile__user__pk=employee_pk)
+
+    # GET: Single Education
+    def get(self, request, employee_pk, education_pk):
+        try:
+            education = self.get_object(employee_pk, education_pk)
+        except Education.DoesNotExist:
+            return Response({"error": "Education not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = EducationSerializer(education)
+        return Response(serializer.data)
+
+    # PUT/PATCH: Update
+    def put(self, request, employee_pk, education_pk):
+        return self.patch(request, employee_pk, education_pk)
+
+    def patch(self, request, employee_pk, education_pk):
+        try:
+            education = self.get_object(employee_pk, education_pk)
+        except Education.DoesNotExist:
+            return Response({"error": "Education not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = EducationSerializer(education, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # DELETE: Remove
+    def delete(self, request, employee_pk, education_pk):
+        try:
+            education = self.get_object(employee_pk, education_pk)
+        except Education.DoesNotExist:
+            return Response({"error": "Education not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        education.delete()
+        return Response({"message": "Education deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+
 class EmployeeExperienceView(APIView):
     permission_classes = [IsAdminUser]
 
+    def get_profile(self, employee_pk):
+        return Profile.objects.get(user__pk=employee_pk)
+
+    def get(self, request, employee_pk):
+        try:
+            profile = self.get_profile(employee_pk)
+        except Profile.DoesNotExist:
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        experience = profile.experience.all()
+        serializer = ExperienceSerializer(experience, many=True)
+        return Response(serializer.data)
+
     def post(self, request, employee_pk):
         try:
-            profile = Profile.objects.get(user__pk=employee_pk)
+            profile = self.get_profile(employee_pk)
         except Profile.DoesNotExist:
-            return Response({"error": "Employee profile not found."}, status=status.HTTP_404_NOT_FOUND)
-            
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
         serializer = ExperienceSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(profile=profile)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EmployeeExperienceDetailView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get_object(self, employee_pk, experience_pk):
+        return Experience.objects.get(pk=experience_pk, profile__user__pk=employee_pk)
+
+    def get(self, request, employee_pk, experience_pk):
+        try:
+            experience = self.get_object(employee_pk, experience_pk)
+        except Experience.DoesNotExist:
+            return Response({"error": "Experience not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ExperienceSerializer(experience)
+        return Response(serializer.data)
+
+    def put(self, request, employee_pk, experience_pk):
+        return self.patch(request, employee_pk, experience_pk)
+
+    def patch(self, request, employee_pk, experience_pk):
+        try:
+            experience = self.get_object(employee_pk, experience_pk)
+        except Experience.DoesNotExist:
+            return Response({"error": "Experience not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ExperienceSerializer(experience, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, employee_pk, experience_pk):
+        try:
+            experience = self.get_object(employee_pk, experience_pk)
+        except Experience.DoesNotExist:
+            return Response({"error": "Experience not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        experience.delete()
+        return Response({"message": "Experience deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+
 
 
 

@@ -14,8 +14,12 @@ urlpatterns = [
     path('employees/<int:pk>/', EmployeeDetailView.as_view(), name='employee-detail'),
     
     # URLs for managing a specific employee's education and experience
-    path('employees/<int:employee_pk>/education/', EmployeeEducationView.as_view(), name='employee-education'),
-    path('employees/<int:employee_pk>/experience/', EmployeeExperienceView.as_view(), name='employee-experience'),
+    path("employees/<int:employee_pk>/education/", EmployeeEducationView.as_view()),
+    path("employees/<int:employee_pk>/education/<int:education_pk>/", EmployeeEducationDetailView.as_view()),
+
+    path("employees/<int:employee_pk>/experience/", EmployeeExperienceView.as_view()),
+    path("employees/<int:employee_pk>/experience/<int:experience_pk>/", EmployeeExperienceDetailView.as_view()),
+
     path('warnings/', WarningListCreateView.as_view(), name='warning-list-create'),
     path('warnings/<int:pk>/', WarningDetailView.as_view(), name='warning-detail'),
     path('terminations/', TerminationListCreateView.as_view(), name='termination-list-create'),
