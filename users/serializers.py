@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Profile, Education, Experience
+from .models import User, Profile, Education, Experience,Role
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
@@ -12,9 +12,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ['id', 'email', 'first_name', 'last_name', 'role', 'is_active']
 
 
-# ==========================
-# Register Serializer (FIXED)
-# ==========================
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
@@ -43,10 +41,12 @@ class RegisterSerializer(serializers.ModelSerializer):
         
         return user
 
+class RoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ['id', 'name']
 
-# ==========================
-# Login Serializer
-# ==========================
+
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
@@ -127,6 +127,7 @@ class PersonalInfoSerializer(serializers.ModelSerializer):
 # UserProfileSerializer (Remains the same, aggregates data)
 # ==========================
 class UserProfileSerializer(serializers.ModelSerializer):
+    role = RoleSerializer(read_only=True)
     profile = PersonalInfoSerializer(read_only=True)
     education = EducationSerializer(many=True, read_only=True, source='profile.education')
     experience = ExperienceSerializer(many=True, read_only=True, source='profile.experience')

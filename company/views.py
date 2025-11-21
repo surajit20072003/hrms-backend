@@ -1591,8 +1591,9 @@ class ManualAttendanceView(APIView):
         
         employees_in_dept = Profile.objects.filter(
             department_id=dept_id, 
-            user__role='EMPLOYEE'
-        ).select_related('user', 'work_shift').order_by('employee_id')
+            user__is_superuser=False, 
+            user__is_active=True
+        ).select_related('user', 'user__role', 'work_shift').order_by('employee_id')
         
         output = []
         for profile in employees_in_dept:
@@ -2693,25 +2694,36 @@ class NoticeDetailAPIView(APIView):
 
 class DashboardDataAPIView(APIView):
     """
-    Provides key metrics (Employee count, Department count, Present/Absent count) 
-    and recent activity data (Notice Board).
+    Provides key metrics (Employee count, Department count, Present/Absent count).
+    Total count includes all active users EXCEPT those marked as Superuser.
     """
     permission_classes = [IsAdminUser] 
 
     def get(self, request, *args, **kwargs):
         today = date.today()
         
+        # 1. Total Active Employees Count (Excluding only Superuser accounts)
+        
+        # Define the base filter for counting all relevant staff:
+        staff_base_filter = Q(is_superuser=False) & Q(is_active=True)
+        
+        # Count all active staff who are NOT superusers and have a linked profile
         total_employees = User.objects.filter(
-            role=User.Role.EMPLOYEE,             # User model field
-            profile__status='Active',            # Profile model field
-            profile__isnull=False                # Ensure profile exists
+            staff_base_filter,             
+            profile__status='Active',            
+            profile__isnull=False                
         ).count()
         
-        # Total Active Departments Count
+        # Total Active Departments Count (No change needed)
         total_departments = Department.objects.count()
         
-        # Today's Attendance Record
-        today_attendance_records = Attendance.objects.filter(attendance_date=today)
+        # 2. Today's Attendance Record Filtering
+        
+        # Filter attendance records to match the users counted in 'total_employees'
+        today_attendance_records = Attendance.objects.filter(
+            attendance_date=today,
+            employee__in=User.objects.filter(staff_base_filter).values_list('pk', flat=True)
+        ).filter(employee__profile__status='Active') # Only check attendance for active employees
         
         # Present Count
         present_count = today_attendance_records.filter(is_present=True).count()
@@ -2720,7 +2732,7 @@ class DashboardDataAPIView(APIView):
         absent_count = total_employees - present_count
         
         
-        # --- 2. Today Attendance List (Only Present Employees' Summary) ---
+        # --- 3. Today Attendance List (Only Present Employees' Summary) ---
         
         attendance_list = []
         today_present_records = today_attendance_records.filter(is_present=True).select_related('employee__profile')
@@ -2739,6 +2751,7 @@ class DashboardDataAPIView(APIView):
                 "late_duration": format_duration(record.late_duration), 
             })
             
+        # 4. Notice Board Data
         latest_notice = Notice.objects.filter(status='PUBLISHED').order_by('-publish_date').first()
         
         notice_data = None
@@ -2748,6 +2761,8 @@ class DashboardDataAPIView(APIView):
                 'publish_date': latest_notice.publish_date.strftime("%d %b %Y"),
                 'description': latest_notice.description,
             }
+            
+        # 5. Final Response
         return Response({
             'success': True,
             'metrics': {
@@ -2759,7 +2774,6 @@ class DashboardDataAPIView(APIView):
             'today_attendance_list': attendance_list,
             'notice_board': notice_data,
         })
-    
 
 
 class LateDeductionRuleListCreateAPIView(APIView):
