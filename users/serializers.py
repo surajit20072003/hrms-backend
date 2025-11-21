@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Profile, Education, Experience,Role
+from .models import User, Profile, Education, Experience,Role,Page
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
@@ -41,10 +41,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         
         return user
 
-class RoleSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Role
-        fields = ['id', 'name']
 
 
 class LoginSerializer(serializers.Serializer):
@@ -122,10 +118,62 @@ class PersonalInfoSerializer(serializers.ModelSerializer):
         ]
         # full_name is a property, so mark it read_only
         read_only_fields = ['full_name', 'employee_id', 'date_of_leaving', 'date_of_joining'] 
+
+
+
+
+class RoleListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Role
+        fields = ['id', 'name']
+
+
+# --- 4A: Page Serializer ---
+class PageSerializer(serializers.ModelSerializer):
+    """ Serializes the Page model for listing all available permissions/features. """
+    
+    # Optional: Display the linked native permission codename for debugging/clarity
+    native_permission_codename = serializers.CharField(
+        source='native_permission.codename', 
+        read_only=True, 
+        allow_null=True
+    )
+
+    class Meta:
+        model = Page
+        fields = ['id', 'name', 'module', 'codename', 'url_name', 'native_permission_codename']
+        read_only_fields = ['codename', 'url_name', 'native_permission_codename']
+
+class RoleSerializer(serializers.ModelSerializer):
+    """ Serializes Role and nests the list of pages assigned to it. """
+    
+    # Nested field jo role ke pages (M2M field) ko serialize karega
+    pages = PageSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Role
+        # 'pages' field M2M relation ko represent karta hai
+        fields = ['id', 'name', 'description', 'pages']
         
-# ==========================
-# UserProfileSerializer (Remains the same, aggregates data)
-# ==========================
+# --- 4C: Page Assignment Serializer (For POST/PATCH Input) ---
+class PageAssignmentSerializer(serializers.Serializer):
+    """ 
+    Serializer to validate and process the list of Page IDs assigned to a Role.
+    Used for POST /api/roles/<id>/pages/
+    """
+    # Validates that the list contains valid Page Primary Keys (PKs)
+    page_ids = serializers.ListField(
+        child=serializers.PrimaryKeyRelatedField(
+            queryset=Page.objects.all(), 
+            # The source name 'page_objects' is a custom name to hold the validated Page objects
+            #source='page_objects' 
+        ),
+        write_only=True,
+        required=True,
+        allow_empty=True, 
+        help_text="A list of Page IDs that should be assigned to the role."
+    )
+
 class UserProfileSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
     profile = PersonalInfoSerializer(read_only=True)

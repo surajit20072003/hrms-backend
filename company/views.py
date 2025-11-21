@@ -35,7 +35,7 @@ class DepartmentListCreateView(APIView):
     """
     Departments ki list dekhein (Pagination aur Search ke saath) ya naya department banayein.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         queryset = Department.objects.all().order_by('name')   
@@ -69,7 +69,7 @@ class DepartmentDetailView(APIView):
     """
     Ek single department ko retrieve, update ya delete karein.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -108,7 +108,7 @@ class DesignationListCreateView(APIView):
     """
     Saare designations ki list dekhein ya naya designation banayein.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -140,7 +140,7 @@ class DesignationDetailView(APIView):
     """
     Ek single designation ko retrieve, update ya delete karein.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -169,7 +169,7 @@ class DesignationDetailView(APIView):
 
 
 class BranchListCreateView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -198,7 +198,7 @@ class BranchListCreateView(APIView):
 
 
 class BranchDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -225,8 +225,7 @@ class BranchDetailView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
     
 class EmployeeListView(APIView):
-    permission_classes = [IsAdminUser]
-
+    permission_classes = [IsAuthenticated]
     def get(self, request):
         # 1. Fetch ALL Profiles (no role restriction here)
         queryset = Profile.objects.select_related(
@@ -280,7 +279,7 @@ class EmployeeListView(APIView):
         return paginator.get_paginated_response(serializer.data)
 
 class EmployeeCreateView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def post(self, request):
         serializer = EmployeeCreateSerializer(data=request.data)
@@ -293,7 +292,7 @@ class EmployeeDetailView(APIView):
     """
     Retrieve, Update or Delete an employee's profile instance for ANY role.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -332,7 +331,7 @@ class EmployeeDetailView(APIView):
     
 
 class EmployeeEducationView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_profile(self, employee_pk):
         return Profile.objects.get(user__pk=employee_pk)
@@ -362,7 +361,7 @@ class EmployeeEducationView(APIView):
 
 
 class EmployeeEducationDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, employee_pk, education_pk):
         return Education.objects.get(pk=education_pk, profile__user__pk=employee_pk)
@@ -404,7 +403,7 @@ class EmployeeEducationDetailView(APIView):
         return Response({"message": "Education deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
 
 class EmployeeExperienceView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_profile(self, employee_pk):
         return Profile.objects.get(user__pk=employee_pk)
@@ -433,7 +432,7 @@ class EmployeeExperienceView(APIView):
 
 
 class EmployeeExperienceDetailView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, employee_pk, experience_pk):
         return Experience.objects.get(pk=experience_pk, profile__user__pk=employee_pk)
@@ -480,7 +479,7 @@ class WarningListCreateView(APIView):
     """
     List all warnings or create a new warning.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -516,7 +515,7 @@ class WarningDetailView(APIView):
     """
     Retrieve, update or delete a warning instance.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -546,7 +545,7 @@ class TerminationListCreateView(APIView):
     """
     List all terminations or create a new one.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -581,7 +580,7 @@ class TerminationDetailView(APIView):
     """
     Retrieve, update or delete a termination instance.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -611,7 +610,7 @@ class PromotionListCreateView(APIView):
     """
     List all promotions or create a new promotion.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
 
@@ -644,7 +643,7 @@ class PromotionDetailView(APIView):
     """
     Retrieve, update or delete a promotion instance.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -674,7 +673,7 @@ class EmployeeJobStatusUpdateView(APIView):
     """
     Update the job_status of a specific employee (e.g., from 'Probation' to 'Permanent').
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
         try:
@@ -696,7 +695,7 @@ class HolidayListCreateView(APIView):
     Admin can list all holiday names or create a new one.
     (Corresponds to "Manage Holiday")
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """ List all holidays with search and pagination. """
@@ -723,7 +722,7 @@ class HolidayDetailView(APIView):
     """
     Admin can retrieve, update or delete a specific holiday name.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -755,7 +754,7 @@ class PublicHolidayListCreateView(APIView):
     Admin can list all public holidays with dates or create a new one.
     (Corresponds to "Public Holiday")
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """ List all public holidays with search and pagination (Only by Holiday Name). """
@@ -782,7 +781,7 @@ class PublicHolidayDetailView(APIView):
     """
     Admin can retrieve, update or delete a specific public holiday.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -814,7 +813,7 @@ class WeeklyHolidayListCreateView(APIView):
     Admin can list all weekly holidays or create a new one.
     (Corresponds to "Weekly Holiday")
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -845,7 +844,7 @@ class WeeklyHolidayDetailView(APIView):
     """
     Admin can retrieve, update or delete a specific weekly holiday.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -877,8 +876,7 @@ class LeaveTypeListCreateView(APIView):
     Admin can list all leave types or create a new one.
     (MODIFIED: Auto-allocates balance to ALL active users upon creation)
     """
-    permission_classes = [IsAdminUser]
-    # Assuming LeaveTypeSerializer is imported
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
     
@@ -933,7 +931,7 @@ class LeaveTypeDetailView(APIView):
     """
     Admin can retrieve, update or delete a specific leave type.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         try:
@@ -974,7 +972,7 @@ class EarnLeaveRuleView(APIView):
     Admin can view or update the single Earn Leave Rule.
     (Corresponds to "Earn Leave Configure")
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         # get_or_create ensures there's always one rule object to edit
@@ -1061,7 +1059,7 @@ class AllLeaveApplicationsView(APIView):
     """
     Admin/Manager ke liye sabhi applications ki list dikhata hai.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get(self, request):
         
@@ -1081,7 +1079,7 @@ class LeaveApprovalView(APIView):
     Admin/Manager endpoint to Approve or Reject a leave application (PK based).
     Includes logic to deduct balance from the LeaveBalance table upon approval.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def patch(self, request, pk):
         try:
@@ -1204,7 +1202,7 @@ class LeaveReportBaseView(APIView):
 
 class EmployeeLeaveReportView(LeaveReportBaseView):
     """ 1. Report: Detailed list of applications for one or all employees"""
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
     
     def get(self, request):
         # Admin can filter by employee_id or see all
@@ -1231,7 +1229,7 @@ class MyLeaveReportView(LeaveReportBaseView):
 
 class LeaveSummaryReportView(APIView):
     """ 3. Report: Consolidated summary of entitlement, consumed, and balance (re02.png). """
-    permission_classes = [IsAdminUser] # Admin/Manager hi Summary Report dekhte hain
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         # Admin can view summary for a specific employee
@@ -1271,7 +1269,7 @@ class WorkShiftListCreateAPIView(APIView):
     """
     Handles listing all shifts (GET) and creating a new shift (POST).
     """
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
 
     def get(self, request, *args, **kwargs):
         """ List all work shifts with search and pagination. """
@@ -1303,7 +1301,7 @@ class WorkShiftDetailAPIView(APIView):
     """
     Handles retrieving (GET), updating (PUT/PATCH), and deleting (DELETE) a specific shift.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, pk, *args, **kwargs):
         """ Retrieve a specific shift """
@@ -1598,7 +1596,7 @@ class MonthlyAttendanceReportView(APIView):
     [MODIFIED] Admin/HR view showing detailed records over a date range, filterable by employee, 
     only showing expected working days and summary.
     """
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
     
     def get(self, request):
         filter_serializer = AttendanceReportFilterSerializer(data=request.query_params)
@@ -1690,7 +1688,7 @@ class ManualAttendanceView(APIView):
     Admin/HR endpoint to view employees of a department on a date (GET) 
     and manually update their attendance records (PATCH).
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """ Filters and lists employees by Department and Date for manual entry. """
@@ -1854,7 +1852,7 @@ class AttendanceReportBaseView(APIView):
 
 class DailyAttendanceReportView(APIView):
     """ Admin/HR view for daily attendance report showing Punch In/Out details for a specific date. """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         serializer = DailyAttendanceFilterSerializer(data=request.query_params)
@@ -1892,7 +1890,7 @@ class DailyAttendanceReportView(APIView):
 
 class AttendanceSummaryReportView(APIView):
     """ Admin/HR view showing a grid summary (P, A, L) for all employees in a given month. """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         serializer = MonthlySummaryFilterSerializer(data=request.query_params)
@@ -1968,7 +1966,7 @@ class AllowanceListCreateView(APIView):
     Handles LISTing all allowances (GET) and CREATING a new allowance (POST).
     Accessible only by Admin/HR.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """ List all Allowance instances with search and pagination. """
@@ -1999,7 +1997,7 @@ class AllowanceDetailView(APIView):
     Handles RETRIEVE (GET), UPDATE (PUT/PATCH), and DELETE for a single allowance.
     Accessible only by Admin/HR.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         """ Helper method to get the Allowance object or raise 404. """
@@ -2043,7 +2041,7 @@ class DeductionListCreateView(APIView):
     Handles LISTing all deductions (GET) and CREATING a new deduction (POST).
     Accessible only by Admin/HR.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """ List all Deduction instances with search and pagination. """
@@ -2075,7 +2073,7 @@ class DeductionDetailView(APIView):
     Handles RETRIEVE (GET), UPDATE (PUT/PATCH), and DELETE for a single deduction.
     Accessible only by Admin/HR.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         """ Helper method to get the Deduction object or raise 404. """
@@ -2117,7 +2115,7 @@ class MonthlyPayGradeListCreateView(APIView):
     Handles GET: List all Monthly Pay Grades.
     Handles POST: Create a new Monthly Pay Grade.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """ List all Monthly Pay Grade instances with search and pagination. """
@@ -2149,7 +2147,7 @@ class MonthlyPayGradeDetailView(APIView):
     Handles GET: Retrieve a single Pay Grade.
     Handles PUT: Full Update, PATCH: Partial Update, DELETE: Delete.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         return get_object_or_404(MonthlyPayGrade, pk=pk)
@@ -2187,7 +2185,7 @@ class HourlyPayGradeListCreateView(APIView):
     Handles GET: List all Hourly Pay Grades.
     Handles POST: Create a new Hourly Pay Grade.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """ List all Hourly Pay Grade instances with search and pagination. """
@@ -2218,7 +2216,7 @@ class HourlyPayGradeDetailView(APIView):
     Handles PUT/PATCH: Update a Pay Grade.
     Handles DELETE: Delete a Pay Grade.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         return get_object_or_404(HourlyPayGrade, pk=pk)
@@ -2258,7 +2256,7 @@ class HourlyPayGradeDetailView(APIView):
 
 class PerformanceCategoryListCreateAPIView(APIView):
     """Handles listing all categories and creating a new category."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all active and inactive performance categories with search and pagination."""
@@ -2284,7 +2282,7 @@ class PerformanceCategoryListCreateAPIView(APIView):
 
 class PerformanceCategoryDetailAPIView(APIView):
     """Handles detailed operations on a single category instance."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         """Helper to safely fetch a category instance."""
@@ -2314,7 +2312,7 @@ class PerformanceCategoryDetailAPIView(APIView):
 
 class PerformanceCriteriaListCreateAPIView(APIView):
     """Handles listing all criteria and creating a new criterion."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all performance criteria with search and pagination."""
@@ -2342,7 +2340,7 @@ class PerformanceCriteriaListCreateAPIView(APIView):
 
 class PerformanceCriteriaDetailAPIView(APIView):
     """Handles detailed operations on a single Performance Criteria instance."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         """Helper to safely fetch a criteria instance."""
@@ -2374,7 +2372,7 @@ class PerformanceCriteriaDetailAPIView(APIView):
 
 class EmployeePerformanceListCreateAPIView(APIView):
     """Handles listing all reviews and creating a new review."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all performance reviews with search and pagination."""
@@ -2402,7 +2400,7 @@ class EmployeePerformanceListCreateAPIView(APIView):
 
 class EmployeePerformanceDetailAPIView(APIView):
     """Handles detailed operations on a single review instance."""
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         """Helper to safely fetch a review instance."""
@@ -2436,7 +2434,7 @@ class PerformanceSummaryReportAPIView(APIView):
     """
     Generates a summary report of employee performance reviews based on filters.
     """
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
     
     def get(self, request, format=None):
         employee_id = request.query_params.get('employee_id')
@@ -2471,7 +2469,7 @@ class JobPostListCreateAPIView(APIView):
     """
     Handles GET (List) and POST (Create) operations using APIView.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get(self, request, format=None):
         """List all job posts with search and pagination."""
@@ -2540,7 +2538,7 @@ class TrainingTypeListCreateAPIView(APIView):
     Handles GET (List) and POST (Create) operations for Training Types using APIView.
     """
     # Permission: Sirf authenticated users ko access
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all training types with search and pagination."""
@@ -2567,7 +2565,7 @@ class TrainingTypeDetailAPIView(APIView):
     """
     Handles GET, PUT, PATCH, and DELETE operations for a single Training Type.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
         """Helper to safely fetch a TrainingType instance."""
@@ -2601,7 +2599,7 @@ class EmployeeTrainingListCreateAPIView(APIView):
     Handles GET (List - etl01.png) and POST (Create - etl02.png) operations for Employee Training.
     """
     # Permission: Sirf authenticated users ko access
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
 
     def get(self, request, format=None):
         """List all employee training records with search and pagination."""
@@ -2631,7 +2629,7 @@ class EmployeeTrainingDetailAPIView(APIView):
     """
     Handles GET, PUT, PATCH, and DELETE operations for a single Employee Training record.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
         """Helper to safely fetch an EmployeeTraining instance."""
@@ -2665,7 +2663,7 @@ class EmployeeTrainingReportAPIView(APIView):
     Handles GET request for the Employee Training Report (emt01.png) with Pagination.
     Filters training records based on employee ID provided in query parameters.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         employee_profile_id = request.query_params.get('employee_id', None)
@@ -2684,7 +2682,7 @@ class EmployeeTrainingReportAPIView(APIView):
     
 
 class AwardListCreateAPIView(APIView):
-    permission_classes = [IsAdminUser]
+    ppermission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all employee awards with search and pagination."""
@@ -2712,7 +2710,7 @@ class AwardListCreateAPIView(APIView):
 
 
 class AwardDetailAPIView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
         """Helper to safely fetch an Award instance."""
@@ -2745,7 +2743,7 @@ class NoticeListCreateAPIView(APIView):
     """
     Handles GET (Notice List - not01.png) and POST (Add New Notice - not02.png) operations.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
         """List all notices with search and pagination."""
@@ -2776,7 +2774,7 @@ class NoticeDetailAPIView(APIView):
     """
     Handles GET, PUT, PATCH, and DELETE operations for a single Notice record.
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
         """Helper to safely fetch a Notice instance."""
@@ -2810,7 +2808,7 @@ class DashboardDataAPIView(APIView):
     Provides key metrics (Employee count, Department count, Present/Absent count).
     Total count includes all active users EXCEPT those marked as Superuser.
     """
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
 
     def get(self, request, *args, **kwargs):
         today = date.today()
@@ -2891,7 +2889,7 @@ class DashboardDataAPIView(APIView):
 
 class LateDeductionRuleListCreateAPIView(APIView):
     """ Handles listing all rules and creating a new rule. """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """ Lists all Late Deduction Rules (List Action). """
@@ -2909,7 +2907,7 @@ class LateDeductionRuleListCreateAPIView(APIView):
 
 class LateDeductionRuleRetrieveUpdateDestroyAPIView(APIView):
     """ Handles detail view, update, and delete for a single rule. """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
         return get_object_or_404(LateDeductionRule, pk=pk)
@@ -2979,7 +2977,7 @@ class TaxRuleSetupAPIView(APIView):
     Handles listing all Tax Rules (GET) and bulk updating/creating (PUT/POST) them.
     (Corresponds to Tax Rule Setup screen: tax01.png)
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """ Lists all Tax Rules, grouped by gender. """
@@ -3147,7 +3145,7 @@ def _calculate_unpaid_days(employee, target_date):
 
 class SinglePaySlipGenerateRetrieveAPIView(APIView):
     
-    permission_classes = [IsAdminUser] 
+    permission_classes = [IsAuthenticated] 
     
     def _calculate_monthly_tax(self, employee, taxable_income):
         """
@@ -3428,7 +3426,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
 
 class MonthlySalarySheetView(APIView):
     """ Lists payment status and gross salary for all employees with Pagination. """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         
@@ -3517,7 +3515,7 @@ class CSVAttendanceUploadView(APIView):
     Handles bulk attendance upload via CSV file.
     Expects columns: employee_id, target_date (YYYY-MM-DD), punch_in_time (HH:MM:SS), punch_out_time (HH:MM:SS)
     """
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         if 'file' not in request.FILES:
@@ -3676,7 +3674,7 @@ class RoleListView(APIView):
     Handles GET (List all Roles) and POST (Create a new Role).
     Access restricted to authenticated Admin users (is_staff=True).
     """
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     # --- GET: List all Roles ---
     def get(self, request, format=None):
@@ -3701,7 +3699,7 @@ class RoleDetailView(APIView):
     Handles GET (Retrieve), PUT/PATCH (Update), and DELETE (Delete) for a single Role instance.
     Access restricted to authenticated Admin users (is_staff=True).
     """
-    permission_classes = [IsAuthenticated, IsAdminUser]
+    permission_classes = [IsAuthenticated]
 
     # Helper function to get the object, returns 404 if not found
     def get_object(self, pk):

@@ -1,12 +1,55 @@
 
-
 from django.db import models
-from django.contrib.auth.models import AbstractUser,Group
+from django.contrib.auth.models import AbstractUser, Group, Permission # Import Permission
 from .managers import UserManager
-from company.models import Department,Designation,Branch
+
+# Assuming these imports are available in your structure:
+# from company.models import Department, Designation, Branch, WorkShift, MonthlyPayGrade, HourlyPayGrade
+from company.models import Department,Designation,Branch,WorkShift 
+# Assuming Enums are correctly defined elsewhere:
+# from .enums import JobStatus, Status 
+# (Retaining existing imports for context)
 from .enums import JobStatus, Status
 from company.models import WorkShift
-# --- User Model ---
+
+
+# --- NEW: Page Model for Granular Access Control ---
+class Page(models.Model):
+    """ 
+    Represents a distinct page/feature in the UI (a single checkbox in the Admin panel) 
+    for dynamic permission control.
+    """
+    
+    # Example: "Manage Holiday"
+    name = models.CharField(max_length=100, unique=True) 
+    
+    # Example: 'Leave Management' - Used for grouping in the UI
+    module = models.CharField(max_length=50, help_text="Module/Category (e.g., Administration, Payroll)") 
+    
+    # Example: 'manage_holiday' (A unique identifier/codename for the backend permission check)
+    codename = models.CharField(max_length=100, unique=True, help_text="Unique codename for API checks")
+    
+    # Example: '/leave/manage-holiday/' - Used by Frontend for routing
+    url_name = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="Frontend route path") 
+    
+    # Optional link to Django's native Permission for robust API checks
+    native_permission = models.OneToOneField(
+        Permission, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        help_text="Link to a specific Django Permission object"
+    )
+
+    class Meta:
+        verbose_name = "Page Access"
+        verbose_name_plural = "Page Accesses"
+        ordering = ['module', 'name']
+
+    def __str__(self):
+        return f"[{self.module}] {self.name}"
+
+# --- Role Model (UPDATED) ---
 class Role(models.Model):
     """
     Holds dynamic roles that can be created by the Admin from the frontend.
@@ -23,6 +66,14 @@ class Role(models.Model):
         blank=True,
         related_name='custom_role'
     ) 
+    
+    # NEW: Many-to-Many link to the new Page model for menu access control
+    pages = models.ManyToManyField(
+        Page, 
+        blank=True, 
+        related_name='roles',
+        verbose_name="Assigned Pages/Features"
+    )
 
     class Meta:
         verbose_name = "Dynamic Role"
@@ -39,7 +90,7 @@ class Role(models.Model):
     def __str__(self):
         return self.name
 
-# --- User Model (Updated) ---
+# --- User Model (No changes needed, but included for completeness) ---
 class User(AbstractUser):
 
     username = None  # remove username field
@@ -49,7 +100,7 @@ class User(AbstractUser):
         Role, 
         on_delete=models.SET_NULL,
         null=True,
-        blank=True, # Allow null role initially if needed
+        blank=True, 
         related_name='users'
     )
 
@@ -91,7 +142,7 @@ class User(AbstractUser):
     def is_primary_admin(self):
         return self.is_staff and self.role and self.role.name == "Admin"
 
-# --- Profile Model (Personal Information) ---
+
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     
@@ -105,7 +156,7 @@ class Profile(models.Model):
     religion = models.CharField(max_length=50, null=True, blank=True)
     marital_status = models.CharField(max_length=20, null=True, blank=True)
 
-    # --- Employee-Specific Fields ---
+    # --- Employee-Specific Fields (Using string references for company models) ---
     employee_id = models.CharField(max_length=50, unique=True, null=True, blank=True, help_text="Fingerprint/Emp No.")
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True)
     designation = models.ForeignKey(Designation, on_delete=models.SET_NULL, null=True, blank=True)
@@ -113,6 +164,8 @@ class Profile(models.Model):
     supervisor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='subordinates')
     date_of_joining = models.DateField(null=True, blank=True)
     date_of_leaving = models.DateField(null=True, blank=True)
+    
+    # Corrected string references for PayGrades
     monthly_pay_grade = models.ForeignKey(
         'company.MonthlyPayGrade',  
         on_delete=models.SET_NULL, 
@@ -121,7 +174,7 @@ class Profile(models.Model):
         related_name='employees'
     )
     hourly_pay_grade = models.ForeignKey( 
-        'company.HourlyPayGrade', # Use the imported model name
+        'company.HourlyPayGrade', 
         on_delete=models.SET_NULL, 
         null=True, 
         blank=True,
@@ -131,7 +184,6 @@ class Profile(models.Model):
     photo = models.ImageField(upload_to='profile_photos/', null=True, blank=True)
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE, null=True, blank=True)
-    # ADDED new job_status field using Enum
     job_status = models.CharField(max_length=20, choices=JobStatus.choices, default=JobStatus.PERMANENT, null=True, blank=True)
     
     work_shift = models.ForeignKey(
@@ -150,7 +202,7 @@ class Profile(models.Model):
         return f"{self.user.email}'s Profile"
 
 
-# --- Education Model ---
+# --- Education Model (No changes needed) ---
 class Education(models.Model):
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='education')
     institute = models.CharField(max_length=255)
@@ -163,7 +215,7 @@ class Education(models.Model):
     def __str__(self):
         return f"{self.degree} from {self.institute}"
 
-# --- Experience Model ---
+# --- Experience Model (No changes needed) ---
 class Experience(models.Model):
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='experience')
     organization = models.CharField(max_length=255)

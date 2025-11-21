@@ -14,4 +14,16 @@ urlpatterns = [
     path('signup/', RegisterView.as_view(), name='signup'),
     
     path('login/', LoginView.as_view(), name='login'),
+
+    path('pages/', PageListView.as_view(), name='page-list'),
+    
+    # 2. Role Listing for Dropdown
+    path('roles/', RoleListView.as_view(), name='role-list'), 
+    
+    # 3. Role Page Assignment (GET assigned, POST update)
+    path('roles/<int:role_id>/pages/', RolePageAssignmentView.as_view(), name='role-page-assignment'),
+    
+    # 4. Dynamic Menu for Logged-in User
+    path('user/menus/', UserMenuAPIView.as_view(), name='user-menus'),
+
 ]
