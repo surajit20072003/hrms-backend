@@ -15,46 +15,23 @@ from company.models import WorkShift
 
 # --- NEW: Page Model for Granular Access Control ---
 class Page(models.Model):
-    """ 
-    Represents a distinct page/feature in the UI (a single checkbox in the Admin panel) 
-    for dynamic permission control.
-    """
-    
-    # Example: "Manage Holiday"
-    name = models.CharField(max_length=100, unique=True) 
-    
-    # Example: 'Leave Management' - Used for grouping in the UI
-    module = models.CharField(max_length=50, help_text="Module/Category (e.g., Administration, Payroll)") 
-    
-    # **New Field Added Here**
-    module_icon = models.CharField(
-        max_length=50, 
-        default='list_alt', # A default icon name
-        help_text="Icon name for the module (e.g., 'calendar_today'). Stored redundantly for grouping."
-    )
-    
-    # Example: 'manage_holiday' (A unique identifier/codename for the backend permission check)
-    codename = models.CharField(max_length=100, unique=True, help_text="Unique codename for API checks")
-    
-    # Example: '/leave/manage-holiday/' - Used by Frontend for routing
-    url_name = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="Frontend route path") 
-    
-    # Optional link to Django's native Permission for robust API checks
-    native_permission = models.OneToOneField(
-        Permission, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        blank=True,
-        help_text="Link to a specific Django Permission object"
-    )
+    name = models.CharField(max_length=100)
+    module = models.CharField(max_length=50)
+    module_icon = models.CharField(max_length=50, default='list_alt')
+    codename = models.CharField(max_length=100, unique=True)
+    url_name = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    native_permission = models.OneToOneField(Permission, on_delete=models.SET_NULL, null=True, blank=True)
+
+    # NEW
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.CASCADE, related_name='children')
+    module_order = models.PositiveIntegerField(default=999)
+    order = models.PositiveIntegerField(default=999)
 
     class Meta:
         verbose_name = "Page Access"
         verbose_name_plural = "Page Accesses"
-        ordering = ['module', 'name']
+        ordering = ['module_order', 'module', 'order', 'name']
 
-    def __str__(self):
-        return f"[{self.module}] {self.name}"
 
 # --- Role Model (UPDATED) ---
 class Role(models.Model):

@@ -112,57 +112,85 @@ class ExperienceCreateView(APIView):
 
 
 class PageListView(APIView):
-    """ GET /api/pages/: Lists all available Page/Feature items, grouped by module as an array. """
-    permission_classes = [
-        IsAuthenticated
-    ]
-
-    # Define the default icon string used in your model/seeder for reference
+    permission_classes = [IsAuthenticated]
     DEFAULT_ICON = 'list_alt'
 
+    def build_tree(self, pages_map, parent_id=None):
+        nodes = []
+        # get children of this parent sorted by order
+        children = [p for p in pages_map.values() if p.get('parent') == parent_id]
+        children.sort(key=lambda x: (x.get('order', 999), x.get('name', '')))
+
+        for child in children:
+            node = {
+                "id": child['id'],
+                "key": child['url_name'],
+                "label": child['name'],
+                "icon": child.get('module_icon') or self.DEFAULT_ICON,
+                "codename": child['codename'],
+                # roles: if you attach allowed roles to page, include here
+            }
+            # recursively attach children
+            subchildren = self.build_tree(pages_map, child['id'])
+            if subchildren:
+                node['children'] = subchildren
+            nodes.append(node)
+
+        return nodes
+
     def get(self, request):
-        pages = Page.objects.all()
-        serializer = PageSerializer(pages, many=True)
-        
-        # Dictionary structure: {module_name: {'icon': 'icon_name', 'pages': [...]}}
-        grouped_data = {}
-        for item in serializer.data:
-            module = item['module']
-            
-            # Read the icon value from the serialized data
-            icon = item.get('module_icon', self.DEFAULT_ICON) 
-            
-            # Prepare the inner page object, excluding module keys
-            page_data = {
-                k: v for k, v in item.items() 
-                if k not in ['module', 'module_icon'] 
-            }
-            
-            if module not in grouped_data:
-                # Initialize the module object. Use the icon found, or the default if null/missing.
-                grouped_data[module] = {
-                    "icon": icon,
-                    "pages": []
+        pages_qs = Page.objects.all().order_by('module_order','module','order','name')
+        serializer = PageSerializer(pages_qs, many=True)
+        pages = serializer.data
+
+        # map by id for fast lookup
+        pages_map = {p['id']: p for p in pages}
+
+        # Build modules as top level: modules determined by pages where parent is None and module_order grouping
+        # We want modules ordered by module_order (use first page's module_order)
+        modules = {}
+        for p in pages:
+            module = p['module']
+            if module not in modules:
+                modules[module] = {
+                    'module_order': p.get('module_order', 999),
+                    'icon': p.get('module_icon') or self.DEFAULT_ICON
                 }
-            
-            # ⭐ CRITICAL FIX: Overwrite the icon if we find a specific, non-default icon.
-            # This ensures modules initialized with 'list_alt' get updated when the specific page is processed.
-            if icon != self.DEFAULT_ICON:
-                 grouped_data[module]['icon'] = icon
-                 
-            grouped_data[module]['pages'].append(page_data)
-        
-        # Structure the grouped data into the final array/list format
-        final_array = []
-        for module_name, data in grouped_data.items():
-            module_object = {
-                "name": module_name,
-                "icon": data['icon'],
-                "pages": data['pages']
-            }
-            final_array.append(module_object)
-            
-        return Response(final_array)
+            # prefer a real icon if found
+            if p.get('module_icon') and p.get('module_icon') != self.DEFAULT_ICON:
+                modules[module]['icon'] = p.get('module_icon')
+
+        # Build final module list
+        result = []
+        for module_name, meta in sorted(modules.items(), key=lambda x: x[1]['module_order']):
+            # find top-level pages for this module (pages with parent is None and page.module == module_name)
+            top_pages = [p for p in pages if p['module'] == module_name and p.get('parent') in (None, '', 0)]
+            # Build module children by using build_tree on each top page
+            children = []
+            # sort top_pages by order or name
+            top_pages.sort(key=lambda x: (x.get('order', 999), x.get('name', '')))
+            for tp in top_pages:
+                node = {
+                    "id": tp['id'],
+                    "key": tp['url_name'],
+                    "label": tp['name'],
+                    "icon": tp.get('module_icon') or meta['icon'],
+                    "codename": tp['codename'],
+                }
+                sub = self.build_tree(pages_map, tp['id'])
+                if sub:
+                    node['children'] = sub
+                children.append(node)
+
+            result.append({
+                "key": f"/{module_name.lower().replace(' ', '-')}",
+                "label": module_name,
+                "icon": meta['icon'],
+                "children": children
+            })
+
+        return Response(result)
+    
 
 class RoleListView(APIView):
     """ GET /api/roles/: Lists all Roles for selection dropdown. """

@@ -129,20 +129,13 @@ class RoleListSerializer(serializers.ModelSerializer):
 
 # --- 4A: Page Serializer ---
 class PageSerializer(serializers.ModelSerializer):
-    """ Serializes the Page model for listing all available permissions/features. """
-    
-    # Optional: Display the linked native permission codename for debugging/clarity
-    native_permission_codename = serializers.CharField(
-        source='native_permission.codename', 
-        read_only=True, 
-        allow_null=True
-    )
+    parent = serializers.IntegerField(source='parent_id', read_only=True)
+    native_permission_codename = serializers.CharField(source='native_permission.codename', read_only=True, allow_null=True)
 
     class Meta:
         model = Page
-        # ⭐ CHANGE 1: Include the new module_icon field
-        fields = ['id', 'name', 'module', 'codename', 'url_name', 'module_icon', 'native_permission_codename']
-        read_only_fields = ['codename', 'url_name', 'module_icon', 'native_permission_codename']
+        fields = ['id','name','module','codename','url_name','module_icon','parent','module_order','order','native_permission_codename']
+
 
 class RoleSerializer(serializers.ModelSerializer):
     """ Serializes Role and nests the list of pages assigned to it. """
