@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
 from users.models import Education,Experience,User,Profile,Role
-from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
+from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,WorkShift, LeaveBalance,\
 Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,\
 PaySlip,PaySlipDetail
 from .serializers import DepartmentSerializer,DesignationSerializer,EducationSerializer,EmployeeCreateSerializer,ExperienceSerializer,EmployeeListSerializer,EmployeeDetailSerializer
@@ -928,9 +928,6 @@ class LeaveTypeListCreateView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class LeaveTypeDetailView(APIView):
-    """
-    Admin can retrieve, update or delete a specific leave type.
-    """
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
@@ -947,25 +944,18 @@ class LeaveTypeDetailView(APIView):
     def put(self, request, pk):
         item = self.get_object(pk)
         serializer = LeaveTypeSerializer(item, data=request.data)
-        
+
         if serializer.is_valid():
-            
-            if 'number_of_days' in serializer.validated_data and \
-               serializer.validated_data['number_of_days'] != item.number_of_days:
-                
-                raise serializer.ValidationError({
-                    "number_of_days": "Quota (number_of_days) cannot be updated via this endpoint after creation. Use a separate balance adjustment tool."
-                })
-            
-            serializer.save()
+            serializer.save()  # now number_of_days update allowed
             return Response(serializer.data)
-            
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
         item = self.get_object(pk)
         item.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class EarnLeaveRuleView(APIView):
     """
@@ -987,54 +977,53 @@ class EarnLeaveRuleView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
 class ApplyForLeaveView(APIView):
-    """
-    GET: Employee ke liye Leave Types aur Current Balance dikhata hai .
-    POST: Leave application submit karta hai (dynamic calculation aur validation ke saath).
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         employee = request.user
-        
-        # 1.  FIX: LeaveBalance table se saare balance records fetch karein
-        balance_records = LeaveBalance.objects.filter(employee=employee)
-        
-        balance_data = []
-        for record in balance_records:
-            initial_entitlement = record.entitlement
-            used = initial_entitlement - record.available_balance
-            current_balance = record.available_balance
-            
-            balance_data.append({
-                "leave_type_id": record.leave_type.id,
-                "leave_type_name": record.leave_type.name,
-                "initial_entitlement": round(initial_entitlement, 1),
-                "used_days": round(used, 1),
-                "current_balance": round(max(0.0, current_balance), 1)
+        leave_balances = LeaveBalance.objects.filter(employee=employee)
+
+        data = []
+        for lb in leave_balances:
+            used_days = LeaveApplication.objects.filter(
+                employee=employee,
+                leave_type=lb.leave_type,
+                status=LeaveStatus.APPROVED
+            ).aggregate(total=Sum("number_of_days"))['total'] or 0
+
+            current_balance = lb.entitlement - used_days
+
+            data.append({
+                "leave_type_id": lb.leave_type.id,
+                "leave_type_name": lb.leave_type.name,
+                "entitlement": lb.entitlement,
+                "used_days": used_days,
+                "current_balance": max(0, current_balance)
             })
-        
-        # Note: Agar koi Leave Type, employee ke balance records mein nahi hai, toh woh yahaan nahi dikhega.
-        
+
         return Response({
-            "employee_name": employee.profile.full_name if hasattr(employee, 'profile') else employee.email,
-            "available_leaves": balance_data
+            "employee": employee.email,
+            "leave_summary": data
         })
 
     def post(self, request):
-        # Context mein request pass karein taki Serializer employee ko access kar sake
-        serializer =LeaveApplicationCreateSerializer (data=request.data, context={'request': request}) 
-        
+        serializer = LeaveApplicationCreateSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
         if serializer.is_valid():
-            # Serializer.save() calculated number_of_days ke saath save karega
             serializer.save(employee=request.user)
-            
             return Response(
-                {"message": "Leave application submitted successfully."}, 
+                {"message": "Leave applied successfully! Pending approval."},
                 status=status.HTTP_201_CREATED
             )
+
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 class MyLeaveApplicationsView(APIView):
     """

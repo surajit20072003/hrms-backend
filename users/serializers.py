@@ -127,7 +127,6 @@ class RoleListSerializer(serializers.ModelSerializer):
         model = Role
         fields = ['id', 'name']
 
-
 # --- 4A: Page Serializer ---
 class PageSerializer(serializers.ModelSerializer):
     """ Serializes the Page model for listing all available permissions/features. """
@@ -141,8 +140,9 @@ class PageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Page
-        fields = ['id', 'name', 'module', 'codename', 'url_name', 'native_permission_codename']
-        read_only_fields = ['codename', 'url_name', 'native_permission_codename']
+        # ⭐ CHANGE 1: Include the new module_icon field
+        fields = ['id', 'name', 'module', 'codename', 'url_name', 'module_icon', 'native_permission_codename']
+        read_only_fields = ['codename', 'url_name', 'module_icon', 'native_permission_codename']
 
 class RoleSerializer(serializers.ModelSerializer):
     """ Serializes Role and nests the list of pages assigned to it. """

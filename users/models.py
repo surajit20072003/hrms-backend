@@ -26,6 +26,13 @@ class Page(models.Model):
     # Example: 'Leave Management' - Used for grouping in the UI
     module = models.CharField(max_length=50, help_text="Module/Category (e.g., Administration, Payroll)") 
     
+    # **New Field Added Here**
+    module_icon = models.CharField(
+        max_length=50, 
+        default='list_alt', # A default icon name
+        help_text="Icon name for the module (e.g., 'calendar_today'). Stored redundantly for grouping."
+    )
+    
     # Example: 'manage_holiday' (A unique identifier/codename for the backend permission check)
     codename = models.CharField(max_length=100, unique=True, help_text="Unique codename for API checks")
     

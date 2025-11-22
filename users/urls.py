@@ -23,7 +23,5 @@ urlpatterns = [
     # 3. Role Page Assignment (GET assigned, POST update)
     path('roles/<int:role_id>/pages/', RolePageAssignmentView.as_view(), name='role-page-assignment'),
     
-    # 4. Dynamic Menu for Logged-in User
-    path('user/menus/', UserMenuAPIView.as_view(), name='user-menus'),
 
 ]

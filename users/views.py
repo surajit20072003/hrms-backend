@@ -112,27 +112,57 @@ class ExperienceCreateView(APIView):
 
 
 class PageListView(APIView):
-    """ GET /api/pages/: Lists all available Page/Feature items, grouped by module. """
+    """ GET /api/pages/: Lists all available Page/Feature items, grouped by module as an array. """
     permission_classes = [
         IsAuthenticated
     ]
+
+    # Define the default icon string used in your model/seeder for reference
+    DEFAULT_ICON = 'list_alt'
 
     def get(self, request):
         pages = Page.objects.all()
         serializer = PageSerializer(pages, many=True)
         
-        # Group pages by module for the frontend UI structure
+        # Dictionary structure: {module_name: {'icon': 'icon_name', 'pages': [...]}}
         grouped_data = {}
         for item in serializer.data:
             module = item['module']
+            
+            # Read the icon value from the serialized data
+            icon = item.get('module_icon', self.DEFAULT_ICON) 
+            
+            # Prepare the inner page object, excluding module keys
+            page_data = {
+                k: v for k, v in item.items() 
+                if k not in ['module', 'module_icon'] 
+            }
+            
             if module not in grouped_data:
-                grouped_data[module] = []
+                # Initialize the module object. Use the icon found, or the default if null/missing.
+                grouped_data[module] = {
+                    "icon": icon,
+                    "pages": []
+                }
             
-            # Remove the 'module' key from the inner page object
-            page_data = {k: v for k, v in item.items() if k != 'module'}
-            grouped_data[module].append(page_data)
+            # ⭐ CRITICAL FIX: Overwrite the icon if we find a specific, non-default icon.
+            # This ensures modules initialized with 'list_alt' get updated when the specific page is processed.
+            if icon != self.DEFAULT_ICON:
+                 grouped_data[module]['icon'] = icon
+                 
+            grouped_data[module]['pages'].append(page_data)
+        
+        # Structure the grouped data into the final array/list format
+        final_array = []
+        for module_name, data in grouped_data.items():
+            module_object = {
+                "name": module_name,
+                "icon": data['icon'],
+                "pages": data['pages']
+            }
+            final_array.append(module_object)
             
-        return Response(grouped_data)
+        return Response(final_array)
 
 class RoleListView(APIView):
     """ GET /api/roles/: Lists all Roles for selection dropdown. """
@@ -208,44 +238,7 @@ class RolePageAssignmentView(APIView):
             status=status.HTTP_200_OK
         )
 
-# --- 5D: User Menu API ---
-class UserMenuAPIView(APIView):
-    """ GET /api/user/menus/: Returns the allowed pages for the current user, grouped by module. """
-    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        user = request.user
-        
-        if user.is_superuser:
-            allowed_pages = Page.objects.all().order_by('module', 'name')
-        elif user.role:
-            allowed_pages = user.role.pages.all().order_by('module', 'name')
-        else:
-            return Response({'menu': {}}, status=status.HTTP_200_OK)
-
-        serializer = PageSerializer(allowed_pages, many=True)
-        
-        menu_structure = {}
-        for item in serializer.data:
-            module = item['module']
-            
-            # Prepare page data for frontend menu item
-            page_data = {
-                'id': item['id'],
-                'name': item['name'],
-                'url': item['url_name'], # Use the route path
-                'codename': item['codename'],
-            }
-            
-            if module not in menu_structure:
-                menu_structure[module] = []
-                
-            menu_structure[module].append(page_data)
-
-        return Response({
-            'user_role': user.role.name if user.role else 'Superuser',
-            'menu': menu_structure
-        })
 
 # --- 5E: User Role Assignment/Update API (MISSING VIEW ADDED) ---
 class UserRoleUpdateView(APIView):

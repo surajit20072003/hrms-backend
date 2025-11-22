@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,LeaveBalance,WorkShift, \
+from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,WorkShift,LeaveBalance,\
 Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
 EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,PaySlip,PaySlipDetail
 from users.models import User, Profile, Education, Experience,Role
@@ -371,50 +371,62 @@ class EarnLeaveRuleSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
-    number_of_days = serializers.FloatField(read_only=True, required=False)
-    
+    number_of_days = serializers.FloatField(read_only=True)
+
     class Meta:
         model = LeaveApplication
         fields = [
-            'leave_type', 
-            'from_date', 
-            'to_date', 
+            'leave_type',
+            'from_date',
+            'to_date',
             'purpose',
-            'number_of_days' # Calculated field
+            'number_of_days'
         ]
-        
+
     def validate(self, data):
         employee = self.context['request'].user
         leave_type = data['leave_type']
         from_date = data['from_date']
         to_date = data['to_date']
-        
-        # --- 1. Date Validation & Calculation ---
+
+        # Date Validation
         if from_date > to_date:
-            raise serializers.ValidationError({"from_date": "From Date cannot be after To Date."})
-            
-        time_difference = to_date - from_date
-        requested_days = time_difference.days + 1
-        
-        data['number_of_days'] = float(requested_days) 
-        
+            raise serializers.ValidationError(
+                {"from_date": "Start date cannot be after end date."}
+            )
+
+        requested_days = (to_date - from_date).days + 1
+        data['number_of_days'] = float(requested_days)
+
         if requested_days <= 0:
-             raise serializers.ValidationError({"number_of_days": "Calculated number of days must be greater than zero."})
-             
-        
-        try:
-            balance_record = LeaveBalance.objects.get(employee=employee, leave_type=leave_type)
-            available_balance = balance_record.available_balance
-        except LeaveBalance.DoesNotExist:
-            available_balance = 0.0 # Agar record nahi hai, toh balance zero
-            
-        if requested_days > available_balance:
             raise serializers.ValidationError({
-                "from_date": (f"Requested leave of {requested_days} days exceeds your current available balance "
-                                   f"({round(available_balance, 1)} days for {leave_type.name}).")
+                "number_of_days": "Leave days must be greater than zero."
             })
-        
+
+        # Fetch balance
+        balance = LeaveBalance.objects.filter(
+            employee=employee,
+            leave_type=leave_type
+        ).first()
+
+        if not balance:
+            raise serializers.ValidationError({
+                "leave_type": "No leave balance assigned."
+            })
+
+        # Check enough balance exists
+        if balance.available_balance < requested_days:
+            raise serializers.ValidationError({
+                "message": f"Not enough balance. Available: {balance.available_balance}"
+            })
+
         return data
+
+    def create(self, validated_data):
+        return LeaveApplication.objects.create(
+            **validated_data,
+            status=LeaveStatus.PENDING
+        )
 
 
 class LeaveApplicationListSerializer(serializers.ModelSerializer):
