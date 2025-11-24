@@ -138,15 +138,72 @@ class PageSerializer(serializers.ModelSerializer):
 
 
 class RoleSerializer(serializers.ModelSerializer):
-    """ Serializes Role and nests the list of pages assigned to it. """
-    
-    # Nested field jo role ke pages (M2M field) ko serialize karega
-    pages = PageSerializer(many=True, read_only=True)
-    
+    pages = serializers.SerializerMethodField()
+
     class Meta:
         model = Role
-        # 'pages' field M2M relation ko represent karta hai
         fields = ['id', 'name', 'description', 'pages']
+
+    def get_pages(self, obj):
+        pages = obj.pages.all().order_by('module_order','module','order','name')
+        serializer = PageSerializer(pages, many=True)
+        pages_data = serializer.data
+
+        # Convert list -> dict for quick lookup
+        pages_map = {p['id']: p for p in pages_data}
+
+        def build_tree(parent_id=None):
+            nodes = []
+            children = [p for p in pages_map.values() if p.get('parent') == parent_id]
+            children.sort(key=lambda x: (x.get('order', 999), x.get('name', '')))
+
+            for child in children:
+                node = {
+                    "id": child['id'],
+                    "label": child['name'],
+                    "key": child['url_name'],
+                    "icon": child.get('module_icon'),
+                    "codename": child['codename']
+                }
+                sub = build_tree(child['id'])
+                if sub:
+                    node["children"] = sub
+                nodes.append(node)
+
+            return nodes
+
+        # Group by module like PageListView
+        modules = {}
+        for p in pages_data:
+            mod = p['module']
+            if mod not in modules:
+                modules[mod] = {
+                    "id": p['module_order'],
+                    "label": mod,
+                    "icon": p.get('module_icon'),
+                    "children": []
+                }
+
+        result = []
+        for mod, meta in modules.items():
+            top = [p for p in pages_data if p['module'] == mod and not p.get('parent')]
+            top.sort(key=lambda x: (x.get('order', 999), x.get('name', '')))
+
+            for tp in top:
+                node = {
+                    "id": tp['id'],
+                    "label": tp['name'],
+                    "key": tp['url_name'],
+                    "icon": tp.get('module_icon'),
+                    "codename": tp['codename'],
+                    "children": build_tree(tp['id'])
+                }
+                meta["children"].append(node)
+
+            result.append(meta)
+
+        return result
+
         
 # --- 4C: Page Assignment Serializer (For POST/PATCH Input) ---
 class PageAssignmentSerializer(serializers.Serializer):
