@@ -183,11 +183,14 @@ class PageListView(APIView):
                 children.append(node)
 
             result.append({
+                "id": meta['module_order'],  # <-- ADD THIS
                 "key": f"/{module_name.lower().replace(' ', '-')}",
                 "label": module_name,
                 "icon": meta['icon'],
+                "codename": module_name.lower().replace(" ", "_"),  # optional (future RBAC)
                 "children": children
             })
+
 
         return Response(result)
     
