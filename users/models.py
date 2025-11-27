@@ -139,6 +139,11 @@ class Profile(models.Model):
     gender = models.CharField(max_length=10, null=True, blank=True)
     religion = models.CharField(max_length=50, null=True, blank=True)
     marital_status = models.CharField(max_length=20, null=True, blank=True)
+    face_encoding = models.JSONField(
+        null=True, 
+        blank=True, 
+        verbose_name="128-D Face Encoding"
+    )
 
     # --- Employee-Specific Fields (Using string references for company models) ---
     employee_id = models.CharField(max_length=50, unique=True, null=True, blank=True, help_text="Fingerprint/Emp No.")

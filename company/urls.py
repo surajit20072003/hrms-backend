@@ -129,6 +129,8 @@ urlpatterns = [
     path('payslip/generate/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-generate'),
     # GET: Retrieves a specific payslip record by ID
     path('payslip/<int:pk>/', SinglePaySlipGenerateRetrieveAPIView.as_view(), name='payslip-retrieve'),
+    # POST: Generate payslips for multiple employees based on filters
+    path('payslip/generate-bulk/', BulkPaySlipGenerateAPIView.as_view(), name='payslip-generate-bulk'),
     path('sheet/list/', MonthlySalarySheetView.as_view(), name='monthly-salary-sheet-list'),
     path('change-password/', ChangePasswordView.as_view(), name='change-password'),
     
@@ -140,6 +142,20 @@ urlpatterns = [
     
     # 2. API for Role Detail, Update, and Delete (GET, PUT/PATCH, DELETE)
     path('roles/<int:pk>/', RoleDetailView.as_view(), name='role-detail'),
+
+    path('punch/automatic/', AutomaticAttendanceView.as_view(), name='attendance-automatic-punch'),
+
+    path('bonus-settings/', BonusSettingListCreateView.as_view(), name='bonus-setting-list-create'),
+    path('bonus-settings/<int:pk>/', BonusSettingDetailView.as_view(), name='bonus-setting-detail'),
+
+
+    path('bonus/generate/', GenerateBonusView.as_view(), name='bonus-generate'),
+    
+    # Employee Bonus List
+    path('employee-bonuses/', EmployeeBonusListView.as_view(), name='employee-bonus-list'),
+
+
+    path('payments/mark-paid/', MarkPaymentPaidView.as_view(), name='mark-payment-paid'),
 
 ]
 

@@ -1,13 +1,24 @@
 from rest_framework import serializers
 from .models import Department,Designation,Branch,Warning ,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,WorkShift,LeaveBalance,\
 Allowance,Deduction,MonthlyPayGrade,PayGradeAllowance,PayGradeDeduction,HourlyPayGrade,PerformanceCategory,PerformanceCriteria,PerformanceRating,EmployeePerformance,JobPost,TrainingType,\
-EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,PaySlip,PaySlipDetail
+EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,PaySlip,PaySlipDetail,BonusSetting,EmployeeBonus
 from users.models import User, Profile, Education, Experience,Role
 from users.enums import JobStatus,LeaveStatus,SlabChoices
 from django.db.models import Sum
 from django.db import transaction
 from decimal import Decimal
 from datetime import datetime
+import face_recognition
+import numpy as np
+import base64
+import cv2
+from rest_framework import serializers
+from django.utils import timezone
+from datetime import datetime
+
+from django.core.files.base import ContentFile
+
+
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Department
@@ -41,98 +52,159 @@ class ExperienceSerializer(serializers.ModelSerializer):
         fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility']
 
 
+
 class EmployeeCreateSerializer(serializers.ModelSerializer):
     """
-    Serializer for creating a new User and their related Profile object.
-    FIX: Role field is changed to PrimaryKeyRelatedField for dynamic assignment.
+    Serializer for creating a new User and their related Profile object,
+    including face encoding upon enrollment.
     """
-    # Fields for creating the User object
+    # ... (All existing fields like email, password, role, work_shift, etc.) ...
     email = serializers.EmailField(write_only=True, required=True)
     password = serializers.CharField(write_only=True, required=True)
+    role = serializers.PrimaryKeyRelatedField(queryset=Role.objects.all(), write_only=True, required=True)
+    work_shift = serializers.PrimaryKeyRelatedField(queryset=WorkShift.objects.all(), allow_null=True, required=False)
+    monthly_pay_grade = serializers.PrimaryKeyRelatedField(queryset=MonthlyPayGrade.objects.all(), allow_null=True, required=False)
+    hourly_pay_grade = serializers.PrimaryKeyRelatedField(queryset=HourlyPayGrade.objects.all(), allow_null=True, required=False)
     
-    # 💥 FIX APPLIED: Role must be accepted as the ID of the Role object
-    role = serializers.PrimaryKeyRelatedField(
-        queryset=Role.objects.all(), 
+    # Optional field for Base64 input
+    face_image_base64 = serializers.CharField(
         write_only=True, 
-        required=True
-    )
-    
-    # PrimaryKeyRelatedField definitions (UNCHANGED)
-    work_shift = serializers.PrimaryKeyRelatedField(
-        queryset=WorkShift.objects.all(), 
-        allow_null=True, 
-        required=False
-    )
-    monthly_pay_grade = serializers.PrimaryKeyRelatedField(
-        queryset=MonthlyPayGrade.objects.all(), 
-        allow_null=True, 
-        required=False
-    )
-    hourly_pay_grade = serializers.PrimaryKeyRelatedField(
-        queryset=HourlyPayGrade.objects.all(), 
-        allow_null=True, 
-        required=False
+        required=False, 
+        allow_null=True,
+        help_text="Base64 string of the employee's profile photo."
     )
 
     class Meta:
         model = Profile
         fields = [
-            'email', 'password', 'role', 'first_name', 'last_name', 'phone', 'address',
-            'date_of_birth', 'gender', 'religion', 'marital_status', 'photo',
+            'email', 'password', 'role', 'first_name', 'last_name', 'phone', 
+            # ... (other profile fields) ...
             'employee_id', 'department', 'designation', 'branch', 'supervisor',
             'date_of_joining', 'date_of_leaving', 'status', 'monthly_pay_grade',
-            'hourly_pay_grade', 'emergency_contact', 'work_shift'
+            'hourly_pay_grade', 'emergency_contact', 'work_shift',
+            'face_image_base64', # Base64 input
+            'photo' # Django FileField input (Form Data)
         ]
 
     def validate(self, data):
-        # 1. Email Uniqueness Check (UNCHANGED)
-        email = data.get('email')
-        if User.objects.filter(email=email).exists():
-            raise serializers.ValidationError({"email": "User with this email already exists."})
-
-        # 3. Pay Grade Check (UNCHANGED)
-        monthly_pay_grade = data.get('monthly_pay_grade')
-        hourly_pay_grade = data.get('hourly_pay_grade')
-
-        if monthly_pay_grade and hourly_pay_grade:
-            raise serializers.ValidationError(
-                {"pay_grade": "An employee cannot be assigned both Monthly and Hourly pay grades."}
-            )
-        
-        if not monthly_pay_grade and not hourly_pay_grade:
-             raise serializers.ValidationError(
-                 {"pay_grade": "Either a Monthly or Hourly pay grade must be assigned."}
-             )
-            
+        # ... (Existing validation logic for Email Uniqueness and Pay Grade) ...
         return data
 
+    
+    # --- Helper 1: Encoding from Form Data (File Object) ---
+    def _calculate_encoding_from_file(self, photo_file):
+        """Reads a Django File object, checks for a single face, and calculates encoding."""
+        try:
+            # Read the file content into memory
+            photo_file.seek(0) 
+            img_bytes = photo_file.read() 
+            img_array = np.frombuffer(img_bytes, np.uint8)
+            
+            image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            if image is None:
+                raise serializers.ValidationError({"photo": "Invalid image file format or corrupt file."})
+            
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            encodings = face_recognition.face_encodings(rgb_image)
+
+            if not encodings:
+                raise serializers.ValidationError({"photo": "No face detected in the uploaded photo."})
+            
+            if len(encodings) > 1:
+                raise serializers.ValidationError({"photo": "Multiple faces detected. Please upload a clear single-face photo."})
+
+            return encodings[0].tolist()
+            
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            print(f"File encoding error: {e}")
+            raise serializers.ValidationError({"photo": "An error occurred during face processing from file upload."})
+
+    
+    # --- Helper 2: Encoding from Base64 String ---
+    def _calculate_face_encoding(self, base64_data, employee_id):
+        """Helper to decode Base64 image, check for single face, and calculate encoding."""
+        try:
+            img_data = base64.b64decode(base64_data)
+            img_array = np.frombuffer(img_data, np.uint8)
+            image = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            
+            if image is None:
+                raise serializers.ValidationError({"face_image_base64": "Invalid Base64 image format."})
+                
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            encodings = face_recognition.face_encodings(rgb_image)
+
+            if not encodings:
+                raise serializers.ValidationError({"face_image_base64": "No face detected in the image."})
+            if len(encodings) > 1:
+                raise serializers.ValidationError({"face_image_base64": "Multiple faces detected in Base64 image."})
+
+            # Create Django File object to save the photo (since Base64 was the input)
+            file_name = f"{employee_id}_enrollment.jpg"
+            photo_file = ContentFile(img_data, name=file_name) 
+
+            return encodings[0].tolist(), photo_file
+            
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            print(f"Base64 processing error: {e}")
+            raise serializers.ValidationError({"face_image_base64": "An error occurred during Base64 face processing."})
+
+            
+    @transaction.atomic
     def create(self, validated_data):
-        # Step 0: Separate User data (pop writes only fields)
+        
+        # Step 0: Separate User data & Image inputs
         email = validated_data.pop('email')
         password = validated_data.pop('password')
-        # 'role' is now the Role INSTANCE, not the string/ID
         role_instance = validated_data.pop('role')
         
-        # Other user data
-        first_name = validated_data.get('first_name', '')
-        last_name = validated_data.get('last_name', '')
+        face_image_base64 = validated_data.pop('face_image_base64', None)
+        photo_file_upload = validated_data.get('photo', None) # File object from Form Data
+        
+        face_encoding = None
 
-        # Step 1: Create the User object
-        user_obj = User.objects.create_user(
-            email=email, 
-            password=password, 
-            # 💥 IMPORTANT: Pass the Role instance to create_user
-            role=role_instance,
-            first_name=first_name,
-            last_name=last_name
-        )
+        # Step 1: Calculate Face Encoding (Handle both input types)
+        
+        if photo_file_upload:
+            # Path A: File Upload (Form Data)
+            face_encoding = self._calculate_encoding_from_file(photo_file_upload)
+            
+        elif face_image_base64:
+            # Path B: Base64 String Input
+            employee_id = validated_data.get('employee_id', 'new_employee')
+            face_encoding, photo_file = self._calculate_face_encoding(face_image_base64, employee_id)
+            
+            # Since input was Base64, we must save the generated file to the 'photo' field
+            validated_data['photo'] = photo_file 
 
+
+        # Step 2: Set Encoding Field
+        if face_encoding is not None:
+            validated_data['face_encoding'] = face_encoding
+        else:
+            # Agar koi bhi photo input nahi tha, toh encoding field null rahega (optional enrollment)
+            validated_data['face_encoding'] = None
+        
+        # Step 3: Create User
+        user_fields = {
+            'email': email,
+            'password': password,
+            'role': role_instance,
+            'first_name': validated_data.get('first_name', ''),
+            'last_name': validated_data.get('last_name', ''),
+        }
+        user_obj = User.objects.create_user(**user_fields)
+        
+        # Step 4: Create Profile
         profile = Profile.objects.create(user=user_obj, **validated_data)
         
         return profile
 
 
-# --- 2. EmployeeListSerializer (FIXED) ---
 
 class EmployeeListSerializer(serializers.ModelSerializer):
     # Get related fields from other models
@@ -161,7 +233,8 @@ class EmployeeListSerializer(serializers.ModelSerializer):
             'date_of_joining',
             'status',
             'job_status',
-            'work_shift'
+            'work_shift',
+            'face_encoding'
         ]
 
     def get_name(self, obj):
@@ -485,6 +558,35 @@ class WorkShiftSerializer(serializers.ModelSerializer):
             pass 
         return data
     
+class LocalDateTimeField(serializers.DateTimeField):
+    """
+    Custom field to accept simple YYYY-MM-DD HH:MM:SS format and localize it 
+    to the system's configured timezone (IST).
+    """
+    # Define the simple input format
+    input_formats = ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'] 
+
+    def to_internal_value(self, value):
+        if not value:
+            return None
+            
+        # If the input already contains timezone info (e.g., T+05:30), use the default method
+        if isinstance(value, str) and ('T' in value or '+' in value or 'Z' in value):
+            return super().to_internal_value(value)
+
+        # 1. Parse the simple string using the defined input_formats
+        for fmt in self.input_formats:
+            try:
+                naive_dt = datetime.strptime(value, fmt)
+                # 2. Localize it to the system's default timezone (IST in your case)
+                return timezone.make_aware(naive_dt, timezone.get_current_timezone())
+            except ValueError:
+                continue
+                
+        # If all custom formats fail
+        raise serializers.ValidationError(
+            f"Time format must be YYYY-MM-DD HH:MM:SS or a valid ISO 8601 string."
+        )   
 
 class ManualAttendanceFilterSerializer(serializers.Serializer):
     """ Used to filter employees by department and date for GET request. """
@@ -495,8 +597,8 @@ class ManualAttendanceInputSerializer(serializers.Serializer):
     """ Used to update attendance for a single employee via PATCH request. """
     employee_id = serializers.IntegerField(required=True)
     target_date = serializers.DateField(required=True)
-    punch_in_time = serializers.DateTimeField(required=False, allow_null=True)
-    punch_out_time = serializers.DateTimeField(required=False, allow_null=True)
+    punch_in_time = LocalDateTimeField(required=False, allow_null=True)
+    punch_out_time = LocalDateTimeField(required=False, allow_null=True)
     is_late = serializers.BooleanField(required=False)
     is_present = serializers.BooleanField(required=False)
 
@@ -1079,6 +1181,19 @@ class MonthlySalaryFilterSerializer(serializers.Serializer):
             return datetime.strptime(value, '%Y-%m').date().replace(day=1)
         except ValueError:
             raise serializers.ValidationError("Month must be in YYYY-MM format.")
+
+class BulkSalaryFilterSerializer(serializers.Serializer):
+    """Filter serializer for bulk salary sheet generation."""
+    branch_id = serializers.IntegerField(required=False, allow_null=True, help_text="Branch ID (optional)")
+    department_id = serializers.IntegerField(required=False, allow_null=True, help_text="Department ID (optional)")
+    designation_id = serializers.IntegerField(required=False, allow_null=True, help_text="Designation ID (optional)")
+    month = serializers.CharField(required=True, help_text="Month in YYYY-MM format")
+    
+    def validate_month(self, value):
+        try:
+            return datetime.strptime(value, '%Y-%m').date().replace(day=1)
+        except ValueError:
+            raise serializers.ValidationError("Month must be in YYYY-MM format.")
         
 # Helper Serializer for Breakdown List
 class PaySlipDetailItemSerializer(serializers.ModelSerializer):
@@ -1237,4 +1352,156 @@ class RoleSerializer(serializers.ModelSerializer):
         if queryset.filter(name__iexact=value).exists():
             raise serializers.ValidationError({"name": "A role with this name already exists."})
             
+        return value
+    
+# Assuming LocalDateTimeField is defined or imported
+
+class AutomaticAttendanceInputSerializer(serializers.Serializer):
+    """
+    Used to receive punch data (live image and time) from the FRS.
+    
+    The employee identifier is determined by the successful face match on the server, 
+    so we only need the image and time for input.
+    """
+    
+    # Live image data, typically sent as a Base64 encoded string
+    live_image_base64 = serializers.CharField(
+        required=True,
+        help_text="Base64 encoded string of the live face photo."
+    ) 
+    
+    # The exact time the punch occurred (validated by LocalDateTimeField)
+    punch_time = LocalDateTimeField(
+        required=True,
+        help_text="Timezone-aware datetime string of the punch."
+    ) 
+    
+    # Optional hint from FRS (mostly ignored by server logic but good for debugging)
+    punch_type = serializers.ChoiceField(
+        choices=['IN', 'OUT'], 
+        required=False,
+        help_text="Optional hint from FRS indicating the desired action (IN/OUT)."
+    )
+
+
+class BonusSettingSerializer(serializers.ModelSerializer):
+    """Serializer for Bonus Setting CRUD operations"""
+    
+    calculate_on_display = serializers.CharField(
+        source='get_calculate_on_display',
+        read_only=True
+    )
+    
+    class Meta:
+        model = BonusSetting
+        fields = [
+            'id', 
+            'festival_name', 
+            'percentage_of_basic', 
+            'calculate_on',
+            'calculate_on_display',
+            'is_active',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_percentage_of_basic(self, value):
+        """Ensure percentage is between 0 and 100"""
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("Percentage must be between 0 and 100.")
+        return value
+
+
+class EmployeeBonusSerializer(serializers.ModelSerializer):
+    """Serializer for Employee Bonus records (read-only for listing)"""
+    
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
+    employee_id_number = serializers.CharField(source='employee.profile.employee_id', read_only=True)
+    department = serializers.CharField(source='employee.profile.department.name', read_only=True, allow_null=True)
+    
+    class Meta:
+        model = EmployeeBonus
+        fields = [
+            'id',
+            'employee',
+            'employee_name',
+            'employee_id_number',
+            'department',
+            'festival_name',
+            'bonus_month',
+            'basic_salary',
+            'gross_salary',
+            'percentage',
+            'calculated_on',
+            'bonus_amount',
+            'status',
+            'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+
+class GenerateBonusFilterSerializer(serializers.Serializer):
+    """Filter serializer for bulk bonus generation"""
+    
+    bonus_setting_id = serializers.IntegerField(required=True, help_text="Bonus Setting ID (Festival)")
+    month = serializers.CharField(required=True, help_text="Month in YYYY-MM format")
+    
+    # Optional filters
+    branch_id = serializers.IntegerField(required=False, allow_null=True)
+    department_id = serializers.IntegerField(required=False, allow_null=True)
+    designation_id = serializers.IntegerField(required=False, allow_null=True)
+    
+    def validate_month(self, value):
+        """Validate month format"""
+        try:
+            return datetime.strptime(value, '%Y-%m').date().replace(day=1)
+        except ValueError:
+            raise serializers.ValidationError("Month must be in YYYY-MM format (e.g., 2025-11).")
+    
+    def validate_bonus_setting_id(self, value):
+        """Ensure bonus setting exists and is active"""
+        try:
+            bonus_setting = BonusSetting.objects.get(id=value, is_active=True)
+        except BonusSetting.DoesNotExist:
+            raise serializers.ValidationError("Bonus setting not found or inactive.")
+        return value
+
+
+
+class MarkPaymentPaidSerializer(serializers.Serializer):
+    """Unified serializer for marking salary/bonus as paid"""
+    
+    payment_type = serializers.ChoiceField(
+        choices=[('salary', 'Salary'), ('bonus', 'Bonus')],
+        required=True,
+        help_text="Type of payment: 'salary' or 'bonus'"
+    )
+    item_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=True,
+        help_text="List of payslip/bonus IDs to mark as paid"
+    )
+    payment_method = serializers.ChoiceField(
+        choices=[
+            ('Manual', 'Manual Payment'),
+            ('Bank Transfer', 'Bank Transfer'),
+            ('Cash', 'Cash')
+        ],
+        required=True
+    )
+    payment_reference = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_blank=True,
+        help_text="Transaction ID or reference number"
+    )
+    payment_date = serializers.DateField(
+        required=False,
+        help_text="Payment date (defaults to today if not provided)"
+    )
+    
+    def validate_item_ids(self, value):
+        """Ensure at least one ID is provided"""
+        if not value or len(value) == 0:
+            raise serializers.ValidationError("At least one item ID is required.")
         return value

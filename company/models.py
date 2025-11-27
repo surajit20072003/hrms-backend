@@ -231,6 +231,18 @@ class Attendance(models.Model):
     attendance_date = models.DateField()
     punch_in_time = models.DateTimeField(null=True, blank=True)
     punch_out_time = models.DateTimeField(null=True, blank=True)
+    punch_in_photo = models.ImageField(
+        upload_to='attendance/in_photos/%Y/%m/%d/',
+        null=True, 
+        blank=True,
+        help_text="Live photo captured at Punch-In time."
+    )
+    punch_out_photo = models.ImageField(
+        upload_to='attendance/out_photos/%Y/%m/%d/',
+        null=True, 
+        blank=True,
+        help_text="Live photo captured at Punch-Out time."
+    )
     is_late = models.BooleanField(default=False)
     is_present = models.BooleanField(default=False)
     total_work_duration = models.DurationField(null=True, blank=True)
@@ -784,6 +796,37 @@ class PaySlip(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
     generated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='generated_payslips')
     
+    payment_date = models.DateField(
+        null=True, 
+        blank=True, 
+        help_text="Date when payment was made"
+    )
+    payment_method = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        choices=[
+            ('Manual', 'Manual Payment'),
+            ('Bank Transfer', 'Bank Transfer'),
+            ('Cash', 'Cash')
+        ],
+        help_text="Payment method used"
+    )
+    payment_reference = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Transaction ID or reference number"
+    )
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='salary_payments_made',
+        help_text="User who marked this as paid"
+    )
+    
     class Meta:
         unique_together = ('employee', 'payment_month')
         ordering = ['-payment_month']
@@ -805,3 +848,118 @@ class PaySlipDetail(models.Model):
     
     class Meta:
         ordering = ['item_type', 'item_name']
+
+
+
+
+class BonusSetting(models.Model):
+    """
+    Defines bonus rules for festivals (e.g., Eid bonus 50% of Basic)
+    """
+    festival_name = models.CharField(max_length=100, unique=True, verbose_name="Festival Name")
+    percentage_of_basic = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        verbose_name="Bonus Percentage",
+        help_text="e.g., 50.00 for 50%"
+    )
+    
+    # ✅ Admin selects: Calculate on Basic or Gross?
+    calculate_on = models.CharField(
+        max_length=10,
+        choices=[('BASIC', 'Basic Salary'), ('GROSS', 'Gross Salary')],
+        default='BASIC',
+        verbose_name="Calculate Bonus On"
+    )
+    
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Bonus Setting"
+        verbose_name_plural = "Bonus Settings"
+        ordering = ['festival_name']
+    
+    def __str__(self):
+        return f"{self.festival_name} ({self.percentage_of_basic}% of {self.calculate_on})"
+
+
+class EmployeeBonus(models.Model):
+    """
+    Records bonus given to employees
+    """
+    employee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='bonuses'
+    )
+    bonus_setting = models.ForeignKey(
+        BonusSetting, 
+        on_delete=models.SET_NULL, 
+        null=True,
+        related_name='employee_bonuses'
+    )
+    
+    # Stored for history (snapshot at generation time)
+    festival_name = models.CharField(max_length=100)
+    bonus_month = models.DateField(help_text="Month for which bonus is given")
+    basic_salary = models.DecimalField(max_digits=10, decimal_places=2, null=True,blank=True,help_text="Employee's basic at generation time")
+    gross_salary = models.DecimalField(max_digits=10, decimal_places=2, null=True,blank=True,help_text="Employee's gross at generation time")
+    
+    # Bonus calculation details
+    percentage = models.DecimalField(max_digits=5, decimal_places=2)
+    calculated_on = models.CharField(max_length=10, choices=[('BASIC', 'Basic'), ('GROSS', 'Gross')])
+    bonus_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bonuses_generated'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[('Calculated', 'Calculated'), ('Paid', 'Paid')],
+        default='Calculated',
+        help_text="Payment status"
+    )
+    payment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date when payment was made"
+    )
+    payment_method = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        choices=[
+            ('Manual', 'Manual Payment'),
+            ('Bank Transfer', 'Bank Transfer'),
+            ('Cash', 'Cash')
+        ],
+        help_text="Payment method used"
+    )
+    payment_reference = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Transaction ID or reference number"
+    )
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bonus_payments_made',
+        help_text="User who marked this bonus as paid"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('employee', 'festival_name', 'bonus_month')
+        ordering = ['-bonus_month', '-created_at']
+    
+    def __str__(self):
+        return f"{self.employee.email} - {self.festival_name} - ₹{self.bonus_amount}"

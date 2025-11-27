@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAdminUser,IsAuthenticated
 from users.models import Education,Experience,User,Profile,Role
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,WorkShift, LeaveBalance,\
 Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,\
-PaySlip,PaySlipDetail
+PaySlip,PaySlipDetail,BonusSetting,EmployeeBonus
 from .serializers import DepartmentSerializer,DesignationSerializer,EducationSerializer,EmployeeCreateSerializer,ExperienceSerializer,EmployeeListSerializer,EmployeeDetailSerializer
 DepartmentSerializer, DesignationSerializer,
 from django.db.models import Sum
@@ -16,8 +16,12 @@ from .serializers import LeaveTypeSerializer,WeeklyHolidaySerializer,LeaveApplic
 ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceReportFilterSerializer,DailyAttendanceFilterSerializer,MonthlySummaryFilterSerializer,\
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
 EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
-PaySlipDetailSerializer,MonthlySalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer,RoleSerializer
-
+PaySlipDetailSerializer,MonthlySalaryFilterSerializer,BulkSalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer,RoleSerializer,AutomaticAttendanceInputSerializer,BonusSettingSerializer,EmployeeBonusSerializer,GenerateBonusFilterSerializer,\
+MarkPaymentPaidSerializer
+import numpy as np
+import base64
+import cv2
+import face_recognition
 from datetime import date
 from django.db import transaction
 from django.db.models import Q
@@ -29,7 +33,11 @@ from django.db.models import Prefetch
 from decimal import Decimal
 from .pagination import StandardResultsSetPagination
 import csv
+from django.utils import timezone
+from django.core.files.base import ContentFile
 import io
+from .utils import apply_auto_close_if_needed, calculate_attendance_status_and_times, format_duration, get_expected_working_dates_list,calculate_summary_stats,deserialize_face_encoding,determine_attendance_date
+from datetime import date
 
 class DepartmentListCreateView(APIView):
     """
@@ -1313,189 +1321,6 @@ class WorkShiftDetailAPIView(APIView):
         shift.delete()
         return Response({"message": "Work Shift deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
     
-def format_duration(duration):
-    """ Converts timedelta duration to HH:MM string, showing '00:00' for zero/None. """
-    if duration is None or duration.total_seconds() <= 0:
-        return '00:00'
-    total_seconds = int(duration.total_seconds())
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    # Handle negative durations (for Deficiency calculation)
-    sign = '-' if duration.total_seconds() < 0 else ''
-    return f"{sign}{abs(hours):02d}:{abs(minutes):02d}"
-
-def calculate_attendance_status_and_times(attendance_record, employee_profile):
-    """  Calculates derived attendance fields (duration, is_late, overtime_duration). """
-    punch_in = attendance_record.punch_in_time
-    punch_out = attendance_record.punch_out_time
-    work_shift = employee_profile.work_shift
-    
-    total_work_duration = None
-    is_late_calculated = False
-    late_duration = timedelta(0) 
-    overtime_duration = timedelta(0)
-
-    # Only calculate if a work shift is available and punch in exists
-    if work_shift and punch_in:
-
-        local_tz = timezone.get_current_timezone() 
-        
-        # Get the reliable date from the local-converted PUNCH IN time (Used for Late calculation)
-        comparison_date = punch_in.astimezone(local_tz).date() 
-
-        # --- Late Calculation (Independent of Punch Out) ---
-        late_count_time = work_shift.late_count_time
-        if late_count_time:
-            late_count_dt_naive = datetime.combine(comparison_date, late_count_time) 
-            late_count_dt_local = timezone.make_aware(late_count_dt_naive, timezone=local_tz)
-            
-            punch_in_local = punch_in.astimezone(local_tz)
-            
-            if punch_in_local > late_count_dt_local:
-                is_late_calculated = True
-                duration_diff = punch_in_local - late_count_dt_local
-                late_duration = max(timedelta(0), duration_diff) 
-
-        # --- Duration and Overtime Calculation (Requires Punch Out) ---
-        if punch_out and punch_out > punch_in:
-            total_work_duration = punch_out - punch_in
-            
-            shift_start_time = work_shift.start_time
-            shift_end_time = work_shift.end_time
-            ot_delay_minutes = getattr(work_shift, 'ot_start_delay_minutes', 0)
-            
-            # 1. Shift End Date Calculation (NIGHT SHIFT FIX) 🚀
-            
-            # Start with the Punch In Date
-            shift_end_date = punch_in.astimezone(local_tz).date()
-            
-            # Check for Night Shift: If Shift End Time is EARLIER than Shift Start Time, add one day.
-            if shift_end_time < shift_start_time:
-                shift_end_date += timedelta(days=1)
-                
-            # 2. Shift End DT Creation using the CORRECTED date
-            shift_end_dt_naive = datetime.combine(shift_end_date, shift_end_time) 
-            shift_end_dt_local = timezone.make_aware(shift_end_dt_naive, timezone=local_tz)
-            
-            # 3. Calculate Actual OT Start Time (Shift End + Delay)
-            actual_ot_start_dt_local = shift_end_dt_local + timedelta(minutes=ot_delay_minutes)
-            
-            # 4. Punch-out time ko Local Timezone mein convert karein
-            punch_out_local = punch_out.astimezone(local_tz)
-            
-            # 5. Compare punch_out with Actual OT Start Time
-            if punch_out_local > actual_ot_start_dt_local:
-                 duration_diff = punch_out_local - actual_ot_start_dt_local
-                 overtime_duration = max(timedelta(0), duration_diff)
-
-    return total_work_duration, is_late_calculated, late_duration, overtime_duration
-    # [End of calculate_attendance_status_and_times body]
-
-def get_expected_working_dates_list(from_date, to_date):
-    """ 
-    [NEW HELPER] Returns a list of dates between the range that are NOT a Weekly or Public Holiday. 
-    This list is used to generate the report table rows.
-    """
-    
-    weekly_offs = set(
-        WeeklyHoliday.objects.filter(is_active=True).values_list('day', flat=True)
-    )
-    public_holiday_dates = set()
-    holidays = PublicHoliday.objects.filter(
-        start_date__lte=to_date,
-        end_date__gte=from_date
-    )
-    
-    # Populate public_holiday_dates set
-    for holiday in holidays:
-        current_date = holiday.start_date
-        while current_date <= holiday.end_date and current_date <= to_date:
-            if current_date >= from_date:
-                public_holiday_dates.add(current_date)
-            current_date += timedelta(days=1)
-
-    expected_working_dates = []
-    current_date = from_date
-    while current_date <= to_date:
-        is_weekly_off = current_date.strftime('%A') in weekly_offs
-        is_public_holiday = current_date in public_holiday_dates
-        
-        # Only include the date if it's NOT a weekly off AND NOT a public holiday
-        if not is_weekly_off and not is_public_holiday:
-            expected_working_dates.append(current_date)
-            
-        current_date += timedelta(days=1)
-        
-    return expected_working_dates
-
-
-
-def calculate_summary_stats(records, expected_working_dates, employee_profile, from_date, to_date):
-    """ 
-    Aggregates attendance records and calculates all summary metrics, 
-    including accurate Total Leave count.
-    """
-    
-    # --- 1. Base Counts and Duration Aggregation (UNCHANGED) ---
-    attendance_summary = records.aggregate(
-        total_work_duration_sum=Sum('total_work_duration'),
-        overtime_duration_sum=Sum('overtime_duration'),
-        late_duration_sum=Sum('late_duration'),
-    )
-    
-    present_records = records.filter(is_present=True)
-    total_present = present_records.count()
-    total_late = present_records.filter(is_late=True).count()
-    
-    actual_work_duration = attendance_summary.get('total_work_duration_sum') or timedelta(0)
-    overtime_duration = attendance_summary.get('overtime_duration_sum') or timedelta(0)
-    total_late_duration = attendance_summary.get('late_duration_sum') or timedelta(0)
-    
-    # --- 2. Expected Working Days (Total Rows in the Report) (UNCHANGED) ---
-    total_working_days = len(expected_working_dates)
-    
-    # --- 3. Expected Hours Calculation (UNCHANGED) ---
-    expected_shift_duration = timedelta(0) 
-    if employee_profile and employee_profile.work_shift:
-        shift = employee_profile.work_shift
-        start_dt = datetime.combine(date.min, shift.start_time)
-        end_dt = datetime.combine(date.min, shift.end_time)
-        if shift.end_time < shift.start_time:
-            end_dt += timedelta(days=1) 
-        expected_shift_duration = end_dt - start_dt
-
-    expected_working_duration = expected_shift_duration * total_present
-    
-
-    
-    approved_leaves_sum = LeaveApplication.objects.filter(
-        employee=employee_profile.user,
-        status=LeaveStatus.APPROVED,
-        from_date__lte=to_date,
-        to_date__gte=from_date
-    ).aggregate(
-        total_approved_days=Sum('number_of_days')
-    )
-    
-
-    total_leave = approved_leaves_sum.get('total_approved_days') or 0.0
-
-    total_absence = total_working_days - total_present - total_leave
-    
-    deficiency = expected_working_duration - actual_work_duration
-    
-    return {
-        "Total Working Days": total_working_days,
-        "Total Present": total_present,
-        "Total Absence": max(0, total_absence),
-        "Total Leave": total_leave, # Now correct
-        "Total Late": total_late,
-        "Total Late Time": format_duration(total_late_duration),
-        "Expected Working Hour": format_duration(expected_working_duration),
-        "Actual Working Hour": format_duration(actual_work_duration),
-        "Over Time": format_duration(overtime_duration),
-        "Deficiency": format_duration(deficiency),
-    }
 
 class MyAttendanceReportView(APIView):
     """ 
@@ -1517,6 +1342,9 @@ class MyAttendanceReportView(APIView):
         except Profile.DoesNotExist:
             return Response({"error": "Profile not found."}, status=status.HTTP_404_NOT_FOUND)
 
+        # CRITICAL FIX 1: Get the local timezone reference (Asia/Kolkata)
+        local_tz = timezone.get_current_timezone() 
+        
         # 1. Get ALL Attendance records for the employee within the date range
         all_attendance_qs = Attendance.objects.filter(
             employee=employee, 
@@ -1542,16 +1370,25 @@ class MyAttendanceReportView(APIView):
                 # Case A: Attendance record exists (Present, Late, Single Punch)
                 records_for_summary.append(record)
                 
+                # CRITICAL FIX 2: Apply Timezone Localization for Display
+                punch_in_local = None
+                if record.punch_in_time:
+                    punch_in_local = record.punch_in_time.astimezone(local_tz).strftime('%H:%M:%S')
+
+                punch_out_local = None
+                if record.punch_out_time:
+                    punch_out_local = record.punch_out_time.astimezone(local_tz).strftime('%H:%M:%S')
+                
                 output_data.append({
                     "Date": record.attendance_date,
                     "Employee Name": employee_profile.full_name, 
-                    "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
-                    "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
+                    "In Time": punch_in_local if punch_in_local else '--', # <-- FIXED
+                    "Out Time": punch_out_local if punch_out_local else '--', # <-- FIXED
                     "Working Time": format_duration(record.total_work_duration),
                     "Late": "Yes" if record.is_late else "No",
                     "Late Time": format_duration(record.late_duration),       
                     "Over Time": format_duration(record.overtime_duration),    
-                    "Status": "Present" if record.is_present else "Absent",
+                    "Status": record.status if hasattr(record, 'status') else ("Present" if record.is_present else "Absent"),
                 })
             else:
                 # Case B: No Attendance record exists for an expected working day (ABSENT)
@@ -1579,7 +1416,6 @@ class MyAttendanceReportView(APIView):
             "summary": summary
         })
 
-
 class MonthlyAttendanceReportView(APIView):
     """ 
     [MODIFIED] Admin/HR view showing detailed records over a date range, filterable by employee, 
@@ -1595,6 +1431,9 @@ class MonthlyAttendanceReportView(APIView):
         to_date = data['to_date']
         employee_id = data.get('employee_id') 
 
+        # CRITICAL FIX 1: Get the local timezone reference (Asia/Kolkata)
+        local_tz = timezone.get_current_timezone() 
+        
         # 1. Fetch the specific employee profile
         try:
             employee = User.objects.get(pk=employee_id) if employee_id else None
@@ -1630,17 +1469,27 @@ class MonthlyAttendanceReportView(APIView):
             
             if record:
                 # Case A: Attendance record exists
+                
+                # CRITICAL FIX 2: Apply Timezone Localization for Display
+                punch_in_local = None
+                if record.punch_in_time:
+                    punch_in_local = record.punch_in_time.astimezone(local_tz).strftime('%H:%M:%S')
+
+                punch_out_local = None
+                if record.punch_out_time:
+                    punch_out_local = record.punch_out_time.astimezone(local_tz).strftime('%H:%M:%S')
+                
                 output_data.append({
                     "Date": record.attendance_date,
                     "Employee Name": employee_profile.full_name,
                     "Designation": employee_profile.designation.name if employee_profile.designation else '--',
-                    "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
-                    "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
+                    "In Time": punch_in_local if punch_in_local else '--', # <-- FIXED
+                    "Out Time": punch_out_local if punch_out_local else '--', # <-- FIXED
                     "Working Time": format_duration(record.total_work_duration),
                     "Late": "Yes" if record.is_late else "No",
                     "Late Time": format_duration(record.late_duration),       
                     "Over Time": format_duration(record.overtime_duration),    
-                    "Status": "Present" if record.is_present else "Absent",
+                    "Status": record.status if hasattr(record, 'status') else ("Present" if record.is_present else "Absent"),
                 })
             else:
                 # Case B: No Attendance record exists (ABSENT)
@@ -1668,7 +1517,6 @@ class MonthlyAttendanceReportView(APIView):
             "daily_records": output_data,
             "summary": summary
         })
-
 
 
 
@@ -1705,10 +1553,19 @@ class ManualAttendanceView(APIView):
             ).first()
 
             # Time formatting
-            punch_in = attendance_record.punch_in_time.time().strftime('%H:%M:%S') if attendance_record and attendance_record.punch_in_time else None
-            punch_out = attendance_record.punch_out_time.time().strftime('%H:%M:%S') if attendance_record and attendance_record.punch_out_time else None
-            
+            punch_in = None
+            if attendance_record and attendance_record.punch_in_time:
+                punch_in = attendance_record.punch_in_time.strftime('%H:%M:%S')
+
+            punch_out = None
+            if attendance_record and attendance_record.punch_out_time:
+                punch_out = attendance_record.punch_out_time.strftime('%H:%M:%S')
+
             # Use saved duration fields from the model
+            
+            # 💥 FIX/ADDITION: Include total_work_duration (Working Time) 💥
+            total_work_duration_str = format_duration(attendance_record.total_work_duration) if attendance_record and attendance_record.total_work_duration else '00:00'
+            
             overtime = format_duration(attendance_record.overtime_duration) if attendance_record else '00:00'
             late_time = format_duration(attendance_record.late_duration) if attendance_record else '00:00' 
             
@@ -1722,9 +1579,10 @@ class ManualAttendanceView(APIView):
                 "punch_in_time": punch_in,
                 "punch_out_time": punch_out,
                 "is_present": attendance_record.is_present if attendance_record else False,
+                "total_work_duration": total_work_duration_str, 
                 "late_time": late_time,
                 "overtime": overtime,
-                "status": status_indicator, # Include status indicator
+                "status": status_indicator, 
             })
             
         return Response(output)
@@ -1741,9 +1599,7 @@ class ManualAttendanceView(APIView):
         
         try:
             employee = User.objects.get(pk=employee_id)
-            # Use select_related for work_shift to avoid extra query
             employee_profile = Profile.objects.select_related('work_shift').get(user=employee)
-            # DEBUG print statements removed for final code
         except (User.DoesNotExist, Profile.DoesNotExist):
             return Response({"error": f"Employee {employee_id} not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1752,62 +1608,64 @@ class ManualAttendanceView(APIView):
             attendance_date=target_date
         )
 
-        punch_in = data.get('punch_in_time')
-        punch_out = data.get('punch_out_time')
+        punch_in_data = data.get('punch_in_time')
+        punch_out_data = data.get('punch_out_time')
         
-        # Update raw punch times if provided
+        # 1. Update raw punch times based on manual input
         if 'punch_in_time' in data:
-            attendance_record.punch_in_time = punch_in
+            attendance_record.punch_in_time = punch_in_data
         if 'punch_out_time' in data:
-            attendance_record.punch_out_time = punch_out
+            attendance_record.punch_out_time = punch_out_data
         
-        # Check for Punch-in before calculation
+        # Flag to track if auto-close was executed
+        is_auto_closed = False
+
         if attendance_record.punch_in_time:
             
-            # Punch Out validation (only if both are present)
+            # 2. Punch Out validation
             if attendance_record.punch_out_time and attendance_record.punch_out_time <= attendance_record.punch_in_time:
                 return Response({"error": "Punch Out Time must be after Punch In Time."}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Call calculation function (It calculates LATE time regardless of punch_out)
+            # 3. APPLY AUTO-CLOSE RULE
+            is_auto_closed = apply_auto_close_if_needed(attendance_record, employee_profile)
+            
+            # 4. Final Calculation (This is where all metrics are generated)
             (total_work_duration, 
              is_late_calculated, 
              late_duration,                
              overtime_duration) = calculate_attendance_status_and_times(attendance_record, employee_profile)
             
-            # Update Late status and duration (Always run if punch_in exists)
+            # 5. Update Status and Metrics (Saving the calculated values to the model)
             attendance_record.late_duration = late_duration            
             attendance_record.is_late = is_late_calculated
-            
-            # Update Duration/Overtime (Only updated if punch_out was present in the calc function)
-            attendance_record.total_work_duration = total_work_duration
+            attendance_record.total_work_duration = total_work_duration # ✅ Working time saved
             attendance_record.overtime_duration = overtime_duration     
-            attendance_record.is_present = True # Present if punch-in exists
+            attendance_record.is_present = True 
 
-            # --- Status Indicator Logic (Single Punch Handling) ---
-            if attendance_record.punch_in_time and not attendance_record.punch_out_time:
-                 # Single Punch
-                 attendance_record.status = 'Single Punch' 
-            else:
-                 # Both punches are present
-                 attendance_record.status = 'Completed'
+            # Set final status 
+            if not is_auto_closed:
+                attendance_record.status = 'Completed' if attendance_record.punch_out_time else 'Single Punch' 
+            # Note: If is_auto_closed is True, the helper must set the status to 'Auto-Closed'
 
         else:
-            # If punch-in is removed or missing, reset all durations/status
+            # If Punch-in is removed or missing, reset all durations/status
             attendance_record.total_work_duration = None
             attendance_record.overtime_duration = timedelta(0)
             attendance_record.late_duration = timedelta(0)              
             
             attendance_record.is_present = data.get('is_present', False) 
             attendance_record.is_late = False 
-            attendance_record.status = 'Pending' # Or 'Absent'
+            attendance_record.status = 'Pending' 
         
         attendance_record.save()
         
+        # Return the updated calculated metrics to the frontend
         return Response({"message": f"Attendance record updated successfully for Employee {employee_id} on {target_date}.",
+                        "total_work_duration": format_duration(attendance_record.total_work_duration), 
                         "late_time": format_duration(attendance_record.late_duration),   
-                        "overtime": format_duration(attendance_record.overtime_duration)}, 
+                        "overtime": format_duration(attendance_record.overtime_duration),
+                        "status": attendance_record.status}, 
                         status=status.HTTP_200_OK)
-    
 
 
 class AttendanceReportBaseView(APIView):
@@ -1838,7 +1696,6 @@ class AttendanceReportBaseView(APIView):
         
         return records
 
-
 class DailyAttendanceReportView(APIView):
     """ Admin/HR view for daily attendance report showing Punch In/Out details for a specific date. """
     permission_classes = [IsAuthenticated]
@@ -1847,7 +1704,10 @@ class DailyAttendanceReportView(APIView):
         serializer = DailyAttendanceFilterSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         target_date = serializer.validated_data['target_date']
-
+        
+        # 1. CRITICAL: Get the local timezone reference (Asia/Kolkata)
+        local_tz = timezone.get_current_timezone() 
+        
         records = Attendance.objects.filter(attendance_date=target_date).select_related(
             'employee__profile', 
             'employee__profile__designation'
@@ -1857,25 +1717,25 @@ class DailyAttendanceReportView(APIView):
         for record in records:
             profile = record.employee.profile
             
+            # 2. FIX: Convert UTC to Local Time before formatting for display
+            punch_in_local = record.punch_in_time.astimezone(local_tz).strftime('%H:%M:%S') if record.punch_in_time else '--'
+            punch_out_local = record.punch_out_time.astimezone(local_tz).strftime('%H:%M:%S') if record.punch_out_time else '--'
+            
             output_data.append({
                 "Date": record.attendance_date,
                 "Employee ID": profile.employee_id,
                 "Employee Name": profile.full_name,
                 "Designation": profile.designation.name if profile.designation else '--',
-                "In Time": record.punch_in_time.strftime('%H:%M:%S') if record.punch_in_time else '--',
-                "Out Time": record.punch_out_time.strftime('%H:%M:%S') if record.punch_out_time else '--',
+                "In Time": punch_in_local, # Now shows the correct IST time (e.g., 20:50:00)
+                "Out Time": punch_out_local, # Now shows the correct IST time (e.g., 06:00:00)
                 "Working Time": format_duration(record.total_work_duration),
                 "Late": "Yes" if record.is_late else "No",
-                "Late Time": format_duration(record.late_duration),      # <-- FIXED: Using saved field
+                "Late Time": format_duration(record.late_duration),
                 "Over Time": format_duration(record.overtime_duration),   
                 "Status": "Present" if record.is_present else "Absent",
             })
 
         return Response(output_data)
-
-
-
-
 
 class AttendanceSummaryReportView(APIView):
     """ Admin/HR view showing a grid summary (P, A, L) for all employees in a given month. """
@@ -3131,16 +2991,14 @@ def _calculate_unpaid_days(employee, target_date):
 
 
 
-
 class SinglePaySlipGenerateRetrieveAPIView(APIView):
     
     permission_classes = [IsAuthenticated] 
     
+    # --- TAX CALCULATION (Remains Unchanged) ---
     def _calculate_monthly_tax(self, employee, taxable_income):
-        """
-        Calculates the monthly TDS/Tax based on Annual Tax Slabs.
-        Uses cumulative fixed amounts from previous slabs correctly.
-        """
+        # ... (Your existing _calculate_monthly_tax logic here, unchanged) ...
+        
         if taxable_income <= 0:
             return Decimal('0.00')
 
@@ -3149,8 +3007,6 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         annual_taxable_income = taxable_income * Decimal('12.0')
         
         # 2. Fetch Rules
-        # NOTE: It is critical that TaxRule.taxable_amount_fixed stores the CUMULATIVE tax 
-        # up to that slab's limit.
         tax_rules = TaxRule.objects.filter(
             gender=gender, 
             is_active=True
@@ -3164,66 +3020,37 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
             current_limit = rule.total_income_limit
             tax_rate = rule.tax_rate_percentage
             
-            # --- Check 1: Income falls COMPLETELY ABOVE this slab ---
+            # ... (Slab checking logic) ...
             if annual_taxable_income > current_limit:
-                
-                # If the income exceeds the slab limit, we accumulate the fixed tax for this slab.
-                # NOTE: Assuming rule.taxable_amount_fixed is the CUMULATIVE tax up to current_limit.
-                # If it's a REMAINING rule, it shouldn't have a fixed amount, so we handle it next.
-                
                 if rule.slab_type == 'REMAINING':
-                    # This should ideally be the last rule. Tax the rest of the income.
                     taxable_in_slab = annual_taxable_income - previous_limit
                     tax_in_slab = (taxable_in_slab * tax_rate) / Decimal('100.0')
                     total_annual_tax += tax_in_slab
-                    break # Calculation finished
-
-                # If it's a NEXT/FIXED slab, update the total tax to the cumulative tax amount
-                # and set previous_limit for the next iteration.
+                    break 
                 total_annual_tax = rule.taxable_amount_fixed
                 previous_limit = current_limit
                 
-            # --- Check 2: Income falls WITHIN this slab (The Stopping Point) ---
             elif annual_taxable_income > previous_limit:
-                
-                # 1. Pichle slabs ka CUMULATIVE FIXED TAX jodo.
-                # Yeh tax pichle rule ke 'taxable_amount_fixed' mein store hona chahiye.
                 tax_from_previous_slabs = Decimal('0.00')
                 if i > 0:
-                    # Access the CUMULATIVE tax fixed amount from the *previous* rule
                     tax_from_previous_slabs = tax_rules[i-1].taxable_amount_fixed
                     
-                # Total annual tax is now set to the cumulative tax up to the previous limit
                 total_annual_tax = tax_from_previous_slabs
-                
-                # 2. Current slab mein kitni income aayi?
                 taxable_in_current_slab = annual_taxable_income - previous_limit
-                
-                # 3. Tax calculate karein aur jodo
                 tax_in_slab = (taxable_in_current_slab * tax_rate) / Decimal('100.0')
                 total_annual_tax += tax_in_slab
-                
-                # Calculation complete
                 break 
 
-            # --- Check 3: Income is below the current slab's starting limit ---
-            # If income is below the minimum taxable limit, loop finishes and total_annual_tax remains 0.
-            
-        # 4. Monthly Tax
         monthly_tax = total_annual_tax / Decimal('12.0')
         return round(monthly_tax, 2)
-
-
     
+    # ----------------------------------------------------------------------------------
+    #                                MONTHLY PAYSLIP LOGIC
+    # ----------------------------------------------------------------------------------
 
-    def _generate_payslip(self, employee, target_date, requesting_user):
-        """ The core calculation logic, fixed for caps and consistent deductions, 
-            using the MonthlyPayGrade.overtime_rate as the fixed hourly pay rate.
-        """
+    def _calculate_monthly_payslip(self, employee, target_date, requesting_user):
+        """ Calculates payslip for employees with a MonthlyPayGrade (Your original logic). """
         
-        if not employee.profile or not employee.profile.monthly_pay_grade:
-            raise ValueError("Employee profile or assigned Monthly Pay Grade is missing.")
-            
         pay_grade = employee.profile.monthly_pay_grade
         master_basic_salary = pay_grade.basic_salary
         
@@ -3233,12 +3060,11 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         if days_in_month == 0: raise ValueError("Invalid month range calculation.")
             
         per_day_rate_basic = master_basic_salary / days_in_month 
-        per_hour_rate = per_day_rate_basic / Decimal('8.0') # Still needed for Late Deduction calculation base
 
+        # Calculate Late Deduction
         late_count = Attendance.objects.filter(
             employee=employee, attendance_date__year=year, attendance_date__month=month, is_late=True
         ).count()
-        
         late_deduction_amount = Decimal('0.00')
         late_rule = LateDeductionRule.objects.filter(
             late_days_threshold__lte=late_count 
@@ -3248,32 +3074,26 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
             late_deduction_days = late_rule.deduction_days
             late_deduction_amount = late_deduction_days * per_day_rate_basic
             
+        # Calculate Absence Cut (Unpaid Days)
         unpaid_absence_days = _calculate_unpaid_days(employee, target_date)
         unjustified_cut_amount = unpaid_absence_days * per_day_rate_basic
         
         # --- STEP 3: Adjusted Earning Calculation (Pro-Rata & Overtime) ---
         
-        # Summing up all overtime_duration for the month
+        # Overtime Calculation
         total_ot_duration = Attendance.objects.filter(
             employee=employee, attendance_date__year=year, attendance_date__month=month,
         ).aggregate(total_ot=Sum('overtime_duration'))['total_ot'] or timedelta(0)
         
-        # 🛑 FIX: Use Pay Grade's overtime_rate directly as the HOURLY PAY RATE
         ot_hourly_rate = pay_grade.overtime_rate 
-
-        # Check for valid rate
-        if ot_hourly_rate is None or ot_hourly_rate <= Decimal('0.00'):
-            overtime_pay_amount = Decimal('0.00')
-        else:
-            # Calculate Total Hours from the summed timedelta
+        overtime_pay_amount = Decimal('0.00')
+        if ot_hourly_rate is not None and ot_hourly_rate > Decimal('0.00'):
             total_ot_hours = Decimal(total_ot_duration.total_seconds() / 3600)
-
-            # Calculation: Total Hours * Fixed Hourly Rate (No per_hour_rate multiplication)
             overtime_pay_amount = total_ot_hours * ot_hourly_rate
             
         overtime_pay_amount = round(overtime_pay_amount, 2)
         
-        # Final Basic Salary Calculation (Pro-Rata)
+        # Final Basic Salary (Pro-Rata)
         final_basic_salary = master_basic_salary - unjustified_cut_amount 
         final_basic_salary = round(final_basic_salary, 2)
 
@@ -3285,14 +3105,8 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         # Standard Allowances: Calculate on Adjusted Basic (Pro-Rata Allowance)
         for pg_allowance in pay_grade.paygradeallowance_set.select_related('allowance').all():
             calculated_amount = final_basic_salary * (pg_allowance.value / 100) 
-            
             limit = pg_allowance.allowance.limit_per_month
-            
-            if limit is not None and limit > Decimal('0.00'):
-                amount = min(calculated_amount, limit)
-            else:
-                amount = calculated_amount
-            
+            amount = min(calculated_amount, limit) if limit is not None and limit > Decimal('0.00') else calculated_amount
             amount = round(amount, 2)
             total_allowances_sum += amount
             allowance_details.append({'item_name': pg_allowance.allowance.allowance_name, 'amount': amount})
@@ -3303,14 +3117,8 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         # Standard Deductions (PF, ESI): Calculate on Adjusted Basic
         for pg_deduction in pay_grade.paygradededuction_set.select_related('deduction').all():
             calculated_amount = final_basic_salary * (pg_deduction.value / 100) 
-            
             limit = pg_deduction.deduction.limit_per_month 
-            
-            if limit is not None and limit > Decimal('0.00'):
-                amount = min(calculated_amount, limit)
-            else:
-                amount = calculated_amount
-            
+            amount = min(calculated_amount, limit) if limit is not None and limit > Decimal('0.00') else calculated_amount
             amount = round(amount, 2)
             standard_deductions_sum += amount
             deduction_details.append({'item_name': pg_deduction.deduction.deduction_name, 'amount': amount})
@@ -3322,58 +3130,170 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
             deduction_details.append({'item_name': 'Income Tax (TDS)', 'amount': tax_amount})
             
         # --- STEP 4: FINAL NET CALCULATION ---
-
         total_deductions_for_net = standard_deductions_sum + late_deduction_amount 
+        final_net_salary = final_gross_salary - total_deductions_for_net
+        final_net_salary = round(final_net_salary, 2)
         
+        # Prepare PaySlip defaults dictionary
+        payslip_defaults = {
+            'basic_salary': final_basic_salary, 
+            'total_overtime_pay': overtime_pay_amount,    
+            'total_tax_deduction': tax_amount,
+            'total_allowances': total_allowances_sum, 
+            'total_deductions': total_deductions_for_net + unjustified_cut_amount, 
+            'gross_salary': final_gross_salary,
+            'net_salary': final_net_salary,
+            'total_days_in_month': days_in_month,
+            'working_days': days_in_month - unpaid_absence_days, 
+            'unjustified_absence': unpaid_absence_days,
+            'late_attendance_count': late_count,
+            'status': 'Calculated',
+            'generated_by': requesting_user
+        }
+        
+        # Return all calculated components for storage
+        return payslip_defaults, allowance_details, deduction_details, late_deduction_amount, unjustified_cut_amount
+
+
+
+    def _calculate_hourly_payslip(self, employee, target_date, requesting_user):
+        """ Calculates payslip for employees with an HourlyPayGrade. """
+        
+        hourly_pay_grade = employee.profile.hourly_pay_grade
+        hourly_rate = hourly_pay_grade.hourly_rate
+        year, month = target_date.year, target_date.month
+        days_in_month = Decimal(monthrange(year, month)[1])
+        
+        # 1. Fetch Total Paid Hours (Regular + Overtime)
+        attendance_records = Attendance.objects.filter(
+            employee=employee, attendance_date__year=year, attendance_date__month=month
+        )
+
+        # Sum total_work_duration (Regular Hours) and overtime_duration
+        total_durations = attendance_records.aggregate(
+            total_work=Sum('total_work_duration'),
+            total_ot=Sum('overtime_duration')
+        )
+        
+        total_work_duration = total_durations['total_work'] or timedelta(0)
+        total_ot_duration = total_durations['total_ot'] or timedelta(0)
+
+        # Convert to Decimal Hours
+        total_regular_hours = Decimal(total_work_duration.total_seconds() / 3600)
+        total_ot_hours = Decimal(total_ot_duration.total_seconds() / 3600)
+
+        # 2. Calculate Earnings
+        # In hourly grades, the "Basic Salary" is the sum of (Regular Hours * Rate)
+        final_basic_salary = total_regular_hours * hourly_rate
+        
+        # Overtime Pay (Assuming Overtime is paid at 1.5x the standard rate, adjust if needed)
+        ot_rate = hourly_rate * Decimal('1.0') 
+        overtime_pay_amount = total_ot_hours * ot_rate
+        
+        final_gross_salary = final_basic_salary + overtime_pay_amount
+        final_gross_salary = round(final_gross_salary, 2)
+        
+        # 3. Deductions (Assuming PF/ESI/Allowances are NOT calculated as % of hourly pay grade, 
+        # or are handled via external logic/fixed amounts not shown here)
+        standard_deductions_sum = Decimal('0.00') 
+        deduction_details = []
+        allowance_details = [] # No allowances structure visible for HourlyPayGrade
+
+        # TAX DEDUCTION (TDS) - based on gross salary
+        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary) 
+        standard_deductions_sum += tax_amount
+        if tax_amount > 0:
+            deduction_details.append({'item_name': 'Income Tax (TDS)', 'amount': tax_amount})
+            
+        # Late/Unpaid Absence Cuts: Handled intrinsically by not having paid/worked hours in attendance.
+        # But if the requirement is to show the total calendar days:
+        unpaid_absence_days = _calculate_unpaid_days(employee, target_date)
+        late_count = attendance_records.filter(is_late=True).count()
+        
+        # Since pay is based only on hours worked, there is typically no separate 'Late Cut' or 'Unjustified Cut'
+        # based on a per-day-rate (as there is no fixed monthly salary to cut from).
+        late_deduction_amount = Decimal('0.00')
+        unjustified_cut_amount = Decimal('0.00')
+        
+        # --- STEP 4: FINAL NET CALCULATION ---
+        total_deductions_for_net = standard_deductions_sum 
         final_net_salary = final_gross_salary - total_deductions_for_net
         final_net_salary = round(final_net_salary, 2)
 
-        # --- STEP 5: Store PaySlip and Details ---
+        # Prepare PaySlip defaults dictionary
+        payslip_defaults = {
+            'basic_salary': final_basic_salary, # Total Regular Pay
+            'total_overtime_pay': overtime_pay_amount,    
+            'total_tax_deduction': tax_amount,
+            'total_allowances': Decimal('0.00'), # Assuming zero based on models provided
+            'total_deductions': total_deductions_for_net + unjustified_cut_amount, 
+            'gross_salary': final_gross_salary,
+            'net_salary': final_net_salary,
+            'total_days_in_month': days_in_month,
+            'working_days': total_regular_hours / Decimal('8.0'), # Display equivalent working days (8hr assumption)
+            'unjustified_absence': unpaid_absence_days, # Still relevant for tracking
+            'late_attendance_count': late_count,
+            'status': 'Calculated',
+            'generated_by': requesting_user
+        }
+        
+        return payslip_defaults, allowance_details, deduction_details, late_deduction_amount, unjustified_cut_amount
+
+
+    
+    def _generate_payslip(self, employee, target_date, requesting_user):
+        """ Main function to determine pay grade type and call the correct calculation logic. """
+
+        if not employee.profile:
+            raise ValueError("Employee profile is missing.")
+
+        if employee.profile.monthly_pay_grade:
+            # Call Monthly Logic
+            payslip_defaults, allowance_details, deduction_details, late_deduction_amount, unjustified_cut_amount = self._calculate_monthly_payslip(
+                employee, target_date, requesting_user
+            )
+        elif employee.profile.hourly_pay_grade:
+            # Call Hourly Logic
+            payslip_defaults, allowance_details, deduction_details, late_deduction_amount, unjustified_cut_amount = self._calculate_hourly_payslip(
+                employee, target_date, requesting_user
+            )
+        else:
+            raise ValueError("Employee must be assigned a Monthly or Hourly Pay Grade.")
+
+        # --- STEP 5: Store PaySlip and Details (Common Storage Logic) ---
         
         with transaction.atomic():
             payslip, created = PaySlip.objects.update_or_create(
                 employee=employee, payment_month=target_date,
-                defaults={
-                    'basic_salary': final_basic_salary, 
-                    'total_overtime_pay': overtime_pay_amount,    
-                    'total_tax_deduction': tax_amount,
-                    'total_allowances': total_allowances_sum, 
-                    'total_deductions': total_deductions_for_net + unjustified_cut_amount, 
-                    'gross_salary': final_gross_salary,
-                    'net_salary': final_net_salary,
-                    'total_days_in_month': days_in_month,
-                    'working_days': days_in_month - unpaid_absence_days, 
-                    'unjustified_absence': unpaid_absence_days,
-                    'late_attendance_count': late_count,
-                    'status': 'Calculated',
-                    'generated_by': requesting_user
-                }
+                defaults=payslip_defaults
             )
 
             payslip.details.all().delete()
             
-            # Store Allowances (Standard)
+            # Store Allowances 
             for item in allowance_details:
                 PaySlipDetail.objects.create(payslip=payslip, item_type='Allowance', **item)
             
-            # Store Overtime Pay separately
-            if overtime_pay_amount > 0:
-                PaySlipDetail.objects.create(payslip=payslip, item_type='Allowance', item_name='Overtime Pay', amount=overtime_pay_amount)
+            # Store Overtime Pay separately (Amount is already in total_overtime_pay, grab name from defaults)
+            if payslip_defaults['total_overtime_pay'] > 0:
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Allowance', item_name='Overtime Pay', amount=payslip_defaults['total_overtime_pay'])
             
             # Store Standard Deductions and Tax
             for item in deduction_details:
                 PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', **item)
 
-            # Store Transactional Cuts (Late Cut)
+            # Store Transactional Cuts (Late Cut - mostly for Monthly)
             if late_deduction_amount > 0:
-                PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', item_name=f'Late Attendance Cut ({late_count} Lates)', amount=late_deduction_amount)
+                PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', item_name=f'Late Attendance Cut ({payslip_defaults["late_attendance_count"]} Lates)', amount=late_deduction_amount)
             
-            # Store Absence Cut for transparency only 
+            # Store Absence Cut (mostly for Monthly)
             if unjustified_cut_amount > 0:
                 PaySlipDetail.objects.create(payslip=payslip, item_type='Deduction', item_name='Unjustified Absence Cut (Days Not Paid)', amount=unjustified_cut_amount)
                 
             return payslip
-                    
+            
+    #
+
     def post(self, request):
         """ Triggers the payslip calculation and storage. """
         
@@ -3395,6 +3315,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            # Log the error (not shown here)
             return Response({"error": f"Payslip generation failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
     def get(self, request, pk):
@@ -3409,9 +3330,6 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         
         serializer = PaySlipDetailSerializer(payslip)
         return Response(serializer.data)
-    
-
-
 
 class MonthlySalarySheetView(APIView):
     """ Lists payment status and gross salary for all employees with Pagination. """
@@ -3423,29 +3341,41 @@ class MonthlySalarySheetView(APIView):
         filter_serializer.is_valid(raise_exception=True)
         target_date = filter_serializer.validated_data['month']
 
-        # 1. Base Employee QuerySet
-        employees_queryset = User.objects.filter(profile__status='Active').select_related('profile__pay_grade', 'profile').order_by('profile__full_name')
+        # 1. Base Employee QuerySet (BOTH pay grades)
+        employees_queryset = User.objects.filter(
+            profile__status='Active'
+        ).select_related(
+            'profile__monthly_pay_grade',  # ✅ Monthly
+            'profile__hourly_pay_grade',   # ✅ Hourly
+            'profile'
+        ).order_by('profile__first_name')
+        
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(employees_queryset, request, view=self)
         
-        # 2. Payslip Prefetching (Only for paginated employees)
-        # Payslip records ko sirf current page ke employee IDs ke liye fetch karo
+        # 2. Payslip Prefetching
         employee_ids_on_page = [e.id for e in page]
         
         payslips_queryset = PaySlip.objects.filter(
             payment_month=target_date,
-            employee_id__in=employee_ids_on_page # Filter by paginated IDs
+            employee_id__in=employee_ids_on_page
         ).prefetch_related('details')
         
         payslips_map = {p.employee_id: p for p in payslips_queryset}
 
         output = []
-        # 3. Loop through the paginated list ('page')
-        for employee in page: # Loop now runs only for 10-20 employees
+        # 3. Loop through employees
+        for employee in page:
             profile = employee.profile
             payslip = payslips_map.get(employee.id)
             
-            pay_grade_name = profile.pay_grade.grade_name if profile.pay_grade else 'N/A'
+            # ✅ FIXED: Handle BOTH pay grade types
+            if profile.monthly_pay_grade:
+                pay_grade_name = f"{profile.monthly_pay_grade.grade_name} (Monthly)"
+            elif profile.hourly_pay_grade:
+                pay_grade_name = f"{profile.hourly_pay_grade.pay_grade_name} (Hourly)"
+            else:
+                pay_grade_name = 'N/A'
             
             overtime_pay = Decimal('0.00')
             tax_deduction = Decimal('0.00')
@@ -3460,6 +3390,7 @@ class MonthlySalarySheetView(APIView):
             output.append({
                 "payslip_id": payslip.pk if payslip else None,
                 "employee_name": profile.full_name,
+                "employee_id": employee.profile.employee_id,
                 "pay_grade": pay_grade_name,
                 "gross_salary": payslip.gross_salary if payslip else Decimal('0.00'), 
                 "overtime_pay": overtime_pay,                      
@@ -3469,6 +3400,98 @@ class MonthlySalarySheetView(APIView):
             })
 
         return paginator.get_paginated_response(output)
+
+
+class BulkPaySlipGenerateAPIView(APIView):
+    """
+    Generate salary sheets for multiple employees at once based on filters.
+    Filters: Branch, Department, Designation (all optional) + Month (required)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        POST /api/payslip/generate-bulk/
+        Body: {
+            "branch_id": 1,  # optional
+            "department_id": 2,  # optional
+            "designation_id": 3,  # optional
+            "month": "2025-11"  # required
+        }
+        """
+        # Step 1: Validate input filters
+        serializer = BulkSalaryFilterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        branch_id = validated_data.get('branch_id')
+        department_id = validated_data.get('department_id')
+        designation_id = validated_data.get('designation_id')
+        target_date = validated_data['month']
+        
+        # Step 2: Build employee queryset based on filters
+        queryset = User.objects.filter(
+            profile__status='Active'  # Only active employees
+        ).select_related('profile__monthly_pay_grade', 'profile__hourly_pay_grade', 'profile')
+        
+        # Apply filters if provided
+        if branch_id:
+            queryset = queryset.filter(profile__branch_id=branch_id)
+        
+        if department_id:
+            queryset = queryset.filter(profile__department_id=department_id)
+        
+        if designation_id:
+            queryset = queryset.filter(profile__designation_id=designation_id)
+        
+        # Only include employees with assigned pay grades
+        queryset = queryset.filter(
+            Q(profile__monthly_pay_grade__isnull=False) | 
+            Q(profile__hourly_pay_grade__isnull=False)
+        )
+        
+        employees = list(queryset)
+        
+        if not employees:
+            return Response({
+                "message": "No employees found matching the filters.",
+                "total_employees": 0,
+                "successful": 0,
+                "failed": 0,
+                "errors": []
+            }, status=status.HTTP_200_OK)
+        
+        # Step 3: Generate payslips for all matching employees
+        total_employees = len(employees)
+        successful = 0
+        failed = 0
+        errors = []
+        
+        # Get reference to the salary generation logic
+        single_payslip_view = SinglePaySlipGenerateRetrieveAPIView()
+        
+        for employee in employees:
+            try:
+                # Reuse existing _generate_payslip method
+                payslip = single_payslip_view._generate_payslip(employee, target_date, request.user)
+                successful += 1
+            except Exception as e:
+                failed += 1
+                errors.append({
+                    "employee_id": employee.id,
+                    "employee_name": employee.profile.full_name if hasattr(employee, 'profile') else employee.email,
+                    "error": str(e)
+                })
+        
+        # Step 4: Return summary
+        return Response({
+            "message": f"Bulk generation completed. {successful} successful, {failed} failed.",
+            "total_employees": total_employees,
+            "successful": successful,
+            "failed": failed,
+            "errors": errors
+        }, status=status.HTTP_200_OK)
 
 
 class ChangePasswordView(APIView):
@@ -3538,7 +3561,6 @@ class CSVAttendanceUploadView(APIView):
             for i, row in enumerate(reader):
                 row_number = i + 2 # Accounting for 0-based index and header row
 
-                # Check if row has expected number of fields (Employee ID, Date, In, Out)
                 if len(row) < 4:
                     failed_records.append({"row": row_number, "error": "Missing required data (expected at least 4 columns)."})
                     continue
@@ -3730,3 +3752,585 @@ class RoleDetailView(APIView):
         # Simple deletion as requested (no safety checks)
         role.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
+class AutomaticAttendanceView(APIView):
+    """
+    Endpoint for automatic attendance recording via face recognition.
+    """
+    permission_classes = [] 
+    authentication_classes = [] 
+    # Threshold for matching faces (Lower value means stricter match)
+    MATCH_THRESHOLD = 0.6 
+
+    def post(self, request, *args, **kwargs):
+        # 1. Validate Input (Ensures 'punch_type' and other fields exist)
+        # Assuming AutomaticAttendanceInputSerializer is correctly defined and handles validation
+        serializer = AutomaticAttendanceInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        
+        live_image_base64 = data['live_image_base64']
+        punch_dt = data['punch_time'] 
+        punch_type = data['punch_type'].upper() # Ensure punch_type is upper-case ('IN'/'OUT')
+
+        # --- A. Face Recognition and Employee Identification ---
+        employee_profile = None
+        img_data = None 
+
+        try:
+            # --- Decode and Face Detection ---
+            try:
+                img_data = base64.b64decode(live_image_base64)
+            except base64.binascii.Error:
+                 return Response({"error": "Base64 Decoding Failed. Invalid Base64 string format."}, status=status.HTTP_400_BAD_REQUEST)
+
+            nparr = np.frombuffer(img_data, np.uint8)
+            live_image_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if live_image_np is None:
+                return Response({"error": "Image Decoding Failed. Not a recognized image format."}, status=status.HTTP_400_BAD_REQUEST)
+                
+            live_image_rgb = cv2.cvtColor(live_image_np, cv2.COLOR_BGR2RGB)
+            live_encodings = face_recognition.face_encodings(live_image_rgb)
+            
+            if not live_encodings:
+                return Response({"error": "No face detected for punch."}, status=status.HTTP_404_NOT_FOUND)
+            if len(live_encodings) > 1:
+                return Response({"error": "Multiple faces detected for punch."}, status=status.HTTP_400_BAD_REQUEST)
+                
+            live_encoding = live_encodings[0]
+
+            # --- Database Matching ---
+            potential_matches = Profile.objects.filter(face_encoding__isnull=False, user__is_active=True).select_related('user', 'work_shift')
+            known_encodings = []
+            profiles_map = {} 
+            for profile in potential_matches:
+                known_face_np = deserialize_face_encoding(profile.face_encoding)
+                if known_face_np is not None:
+                    known_encodings.append(known_face_np)
+                    profiles_map[len(known_encodings) - 1] = profile
+            
+            if not known_encodings:
+                return Response({"error": "No enrolled employee faces found."}, status=status.HTTP_404_NOT_FOUND)
+
+            known_encodings_array = np.array(known_encodings)
+            face_distances = face_recognition.face_distance(known_encodings_array, live_encoding)
+            best_match_index = np.argmin(face_distances)
+            min_distance = face_distances[best_match_index]
+            
+            if min_distance <= self.MATCH_THRESHOLD:
+                employee_profile = profiles_map[best_match_index]
+                employee = employee_profile.user
+            else:
+                return Response({"error": f"Face not recognized. Min distance ({min_distance:.3f}) > threshold ({self.MATCH_THRESHOLD})."}, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            # You should refine exception handling for deployment
+            return Response({"error": f"Recognition process failed: {type(e).__name__} - {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # --- B. Attendance Logic (Simple IN/OUT + Auto-Close) ---
+
+        local_tz = timezone.get_current_timezone()
+        
+        # 2. Determine the correct attendance date (Handles night shifts)
+        if employee_profile.work_shift:
+            # Ensure determine_attendance_date takes punch_dt as a timezone-aware datetime
+            attendance_date = determine_attendance_date(punch_dt, employee_profile.work_shift, local_tz)
+        else:
+            attendance_date = punch_dt.astimezone(local_tz).date() 
+
+        message = ""
+        is_punch_recorded = False
+
+        # 3. Prepare Live Photo File
+        punch_photo_file = None
+        if img_data:
+            try:
+                # Use employee.id (User PK) or employee_profile.employee_id (Fingerprint No.)
+                file_name = f"{employee.id}_{punch_dt.strftime('%Y%m%d%H%M%S')}.jpg"
+                punch_photo_file = ContentFile(img_data, name=file_name) 
+            except Exception:
+                # Log or handle file creation error, but don't crash the punch
+                pass 
+            
+        # 4. Get or Create Attendance Record
+        attendance_record, created = Attendance.objects.get_or_create(
+            employee=employee,
+            attendance_date=attendance_date
+        )
+        
+        # 5. Simple Action Based on punch_type
+        if punch_type == 'IN':
+            # Check for existing punch-in time and update only if it's the first punch or a later punch (to avoid missed early punches)
+            if attendance_record.punch_in_time is None or punch_dt < attendance_record.punch_in_time:
+                attendance_record.punch_in_time = punch_dt
+                if punch_photo_file: attendance_record.punch_in_photo = punch_photo_file 
+                message = "Punch In recorded successfully."
+                is_punch_recorded = True
+            else:
+                 return Response({"warning": "Punch ignored: Time is later than existing Punch In."}, status=status.HTTP_200_OK)
+
+        elif punch_type == 'OUT':
+            if attendance_record.punch_in_time is None:
+                return Response({"error": "Cannot Punch OUT without a Punch IN record."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Punch Out Time must be strictly after Punch In Time
+            if punch_dt <= attendance_record.punch_in_time:
+                 return Response({"error": "Punch Out Time must be strictly after Punch In Time."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Update punch-out only if it's the first punch-out or a later punch
+            if attendance_record.punch_out_time is None or punch_dt > attendance_record.punch_out_time:
+                attendance_record.punch_out_time = punch_dt
+                if punch_photo_file: attendance_record.punch_out_photo = punch_photo_file 
+                message = "Punch Out recorded successfully."
+                is_punch_recorded = True
+            else:
+                 return Response({"warning": "Punch ignored: Time is earlier than existing Punch Out."}, status=status.HTTP_200_OK)
+        
+        else:
+            return Response({"error": "Invalid 'punch_type'. Must be 'IN' or 'OUT'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        
+        # 6. APPLY AUTO-CLOSE RULE (Runs only if Punch OUT is still missing)
+        is_auto_closed = False
+        if is_punch_recorded and punch_type == 'IN':
+            # Check if auto-close applies only if the punch was an IN and OUT is still null
+            if attendance_record.punch_out_time is None:
+                is_auto_closed = apply_auto_close_if_needed(attendance_record, employee_profile)
+        
+        
+        # 7. Recalculate and Finalize Current Record
+        if attendance_record.punch_in_time:
+            # Recalculate metrics based on the current state of the record
+            (total_work_duration, 
+             is_late_calculated, 
+             late_duration, 
+             overtime_duration) = calculate_attendance_status_and_times(attendance_record, employee_profile)
+            
+            attendance_record.total_work_duration = total_work_duration
+            attendance_record.is_late = is_late_calculated
+            attendance_record.late_duration = late_duration
+            attendance_record.overtime_duration = overtime_duration
+            attendance_record.is_present = True
+            
+            # Set final status
+            if is_auto_closed:
+                attendance_record.status = 'Auto-Closed'
+            else:
+                attendance_record.status = 'Completed' if attendance_record.punch_out_time else 'Single Punch' 
+            
+        else:
+            # If punch-in was nullified (e.g., if a previous punch was ignored)
+            attendance_record.is_present = False
+            attendance_record.status = 'Pending' 
+        
+        # 8. Save the current record (Only if data was changed/created)
+        if is_punch_recorded or is_auto_closed or created:
+            attendance_record.save()
+        
+        # 9. Return the final structured response
+        full_name = employee_profile.full_name # Assuming full_name is a property on Profile
+        
+        return Response({
+            "success": True, 
+            "message": message,
+            "id": employee.id,
+            "employee_id":employee_profile.employee_id,
+            "employee_name": full_name,
+            "date": attendance_record.attendance_date,
+            "working_time": format_duration(attendance_record.total_work_duration),
+            "late_time": format_duration(attendance_record.late_duration),
+            "overtime": format_duration(attendance_record.overtime_duration),
+            "status": attendance_record.status
+        }, status=status.HTTP_200_OK)
+
+
+# ============================================
+# BONUS MANAGEMENT VIEWS
+# ============================================
+
+class BonusSettingListCreateView(APIView):
+    """
+    List all bonus settings or create a new one.
+    GET: List with pagination and search
+    POST: Create new bonus setting
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        queryset = BonusSetting.objects.all().order_by('festival_name')
+        
+        # Search filter
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(festival_name__icontains=search_query)
+            )
+        
+        # Pagination
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = BonusSettingSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
+    
+    def post(self, request):
+        serializer = BonusSettingSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class BonusSettingDetailView(APIView):
+    """
+    Retrieve, update or delete a bonus setting.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self, pk):
+        try:
+            return BonusSetting.objects.get(pk=pk)
+        except BonusSetting.DoesNotExist:
+            raise Http404
+    
+    def get(self, request, pk):
+        bonus_setting = self.get_object(pk)
+        serializer = BonusSettingSerializer(bonus_setting)
+        return Response(serializer.data)
+    
+    def put(self, request, pk):
+        bonus_setting = self.get_object(pk)
+        serializer = BonusSettingSerializer(bonus_setting, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def patch(self, request, pk):
+        bonus_setting = self.get_object(pk)
+        serializer = BonusSettingSerializer(bonus_setting, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        bonus_setting = self.get_object(pk)
+        bonus_setting.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GenerateBonusView(APIView):
+    """
+    Generate bonuses for multiple employees based on filters.
+    POST: Generate bonuses for all matching employees
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        POST /api/bonus/generate/
+        Body: {
+            "bonus_setting_id": 1,  # required
+            "month": "2025-11",     # required
+            "branch_id": 1,         # optional
+            "department_id": 2,     # optional
+            "designation_id": 3     # optional
+        }
+        """
+        # Step 1: Validate input
+        serializer = GenerateBonusFilterSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        bonus_setting_id = validated_data['bonus_setting_id']
+        bonus_month = validated_data['month']
+        branch_id = validated_data.get('branch_id')
+        department_id = validated_data.get('department_id')
+        designation_id = validated_data.get('designation_id')
+        
+        # Step 2: Get bonus setting
+        try:
+            bonus_setting = BonusSetting.objects.get(id=bonus_setting_id, is_active=True)
+        except BonusSetting.DoesNotExist:
+            return Response(
+                {"error": "Bonus setting not found or inactive."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Step 3: Build employee queryset
+        queryset = User.objects.filter(
+            profile__status='Active'
+        ).select_related('profile__monthly_pay_grade', 'profile')
+        
+        # Apply filters
+        if branch_id:
+            queryset = queryset.filter(profile__branch_id=branch_id)
+        if department_id:
+            queryset = queryset.filter(profile__department_id=department_id)
+        if designation_id:
+            queryset = queryset.filter(profile__designation_id=designation_id)
+        
+        # Only employees with monthly pay grade
+        queryset = queryset.filter(profile__monthly_pay_grade__isnull=False)
+        
+        employees = list(queryset)
+        
+        if not employees:
+            return Response({
+                "message": "No employees found matching the filters.",
+                "total_employees": 0,
+                "successful": 0,
+                "failed": 0,
+                "errors": []
+            }, status=status.HTTP_200_OK)
+        
+        # Step 4: Generate bonuses
+        total_employees = len(employees)
+        successful = 0
+        failed = 0
+        errors = []
+        
+        for employee in employees:
+            try:
+                profile = employee.profile
+                pay_grade = profile.monthly_pay_grade
+                
+                if not pay_grade:
+                    raise ValueError("No pay grade assigned")
+                
+                # Get basic and gross salary
+                basic_salary = pay_grade.basic_salary
+                gross_salary = pay_grade.gross_salary
+                
+                # Calculate bonus based on setting
+                if bonus_setting.calculate_on == 'BASIC':
+                    bonus_amount = (basic_salary * bonus_setting.percentage_of_basic) / Decimal('100.00')
+                else:  # GROSS
+                    bonus_amount = (gross_salary * bonus_setting.percentage_of_basic) / Decimal('100.00')
+                
+                bonus_amount = round(bonus_amount, 2)
+                
+                # Create or update bonus record
+                EmployeeBonus.objects.update_or_create(
+                    employee=employee,
+                    festival_name=bonus_setting.festival_name,
+                    bonus_month=bonus_month,
+                    defaults={
+                        'bonus_setting': bonus_setting,
+                        'basic_salary': basic_salary,
+                        'gross_salary': gross_salary,
+                        'percentage': bonus_setting.percentage_of_basic,
+                        'calculated_on': bonus_setting.calculate_on,
+                        'bonus_amount': bonus_amount,
+                        'generated_by': request.user
+                    }
+                )
+                successful += 1
+                
+            except Exception as e:
+                failed += 1
+                errors.append({
+                    "employee_id": employee.id,
+                    "employee_name": profile.full_name if hasattr(employee, 'profile') else employee.email,
+                    "error": str(e)
+                })
+        
+        # Step 5: Return summary
+        return Response({
+            "message": f"Bonus generation completed. {successful} successful, {failed} failed.",
+            "total_employees": total_employees,
+            "successful": successful,
+            "failed": failed,
+            "errors": errors
+        }, status=status.HTTP_200_OK)
+
+class EmployeeBonusListView(APIView):
+    """
+    List all employee bonuses with filters and pagination.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        queryset = EmployeeBonus.objects.select_related(
+            'employee__profile__department',
+            'bonus_setting'
+        ).all().order_by('-bonus_month', '-created_at')
+        
+        # Filters
+        festival_name = request.query_params.get('festival_name', None)
+        month = request.query_params.get('month', None)
+        employee_id = request.query_params.get('employee_id', None)
+        
+        if festival_name:
+            queryset = queryset.filter(festival_name__icontains=festival_name)
+        
+        if month:
+            try:
+                month_date = datetime.strptime(month, '%Y-%m').date().replace(day=1)
+                queryset = queryset.filter(bonus_month=month_date)
+            except ValueError:
+                pass
+        
+        if employee_id:
+            queryset = queryset.filter(employee_id=employee_id)
+        status_filter = request.query_params.get('status', None)
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        # Search
+        search_query = request.query_params.get('search', None)
+        if search_query:
+            queryset = queryset.filter(
+                Q(employee__profile__first_name__icontains=search_query) |
+                Q(employee__profile__last_name__icontains=search_query) |
+                Q(festival_name__icontains=search_query)
+            )
+        
+        # Pagination
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = EmployeeBonusSerializer(page, many=True)
+        
+        return paginator.get_paginated_response(serializer.data)
+
+
+
+
+
+
+class MarkPaymentPaidView(APIView):
+    """
+    Unified endpoint to mark salary or bonus as paid.
+    POST: Update payment status to 'Paid'
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        POST /api/payments/mark-paid/
+        Body: {
+            "payment_type": "salary",  // or "bonus"
+            "item_ids": [1, 2, 3],
+            "payment_method": "Manual",
+            "payment_reference": "TXN123456",  // optional
+            "payment_date": "2025-11-27"      // optional
+        }
+        """
+        # Step 1: Validate input
+        serializer = MarkPaymentPaidSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        validated_data = serializer.validated_data
+        payment_type = validated_data['payment_type']
+        item_ids = validated_data['item_ids']
+        payment_method = validated_data['payment_method']
+        payment_reference = validated_data.get('payment_reference', '')
+        payment_date = validated_data.get('payment_date', date.today())
+        
+        # Step 2: Route to appropriate handler
+        if payment_type == 'salary':
+            return self._mark_salary_paid(
+                item_ids, payment_method, payment_reference, payment_date, request.user
+            )
+        else:  # bonus
+            return self._mark_bonus_paid(
+                item_ids, payment_method, payment_reference, payment_date, request.user
+            )
+    
+    def _mark_salary_paid(self, payslip_ids, payment_method, payment_reference, payment_date, user):
+        """Mark payslips as paid"""
+        payslips = PaySlip.objects.filter(id__in=payslip_ids)
+        
+        if not payslips.exists():
+            return Response(
+                {"error": "No payslips found with the provided IDs."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        updated_count = 0
+        already_paid = 0
+        errors = []
+        
+        for payslip in payslips:
+            try:
+                if payslip.status == 'Paid':
+                    already_paid += 1
+                    continue
+                
+                payslip.status = 'Paid'
+                payslip.payment_date = payment_date
+                payslip.payment_method = payment_method
+                payslip.payment_reference = payment_reference
+                payslip.paid_by = user
+                payslip.save()
+                
+                updated_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    "payslip_id": payslip.id,
+                    "employee": payslip.employee.email,
+                    "error": str(e)
+                })
+        
+        return Response({
+            "message": f"Salary payment status updated. {updated_count} marked as paid.",
+            "payment_type": "salary",
+            "total_requested": len(payslip_ids),
+            "updated": updated_count,
+            "already_paid": already_paid,
+            "failed": len(errors),
+            "errors": errors
+        }, status=status.HTTP_200_OK)
+    
+    def _mark_bonus_paid(self, bonus_ids, payment_method, payment_reference, payment_date, user):
+        """Mark bonuses as paid"""
+        bonuses = EmployeeBonus.objects.filter(id__in=bonus_ids)
+        
+        if not bonuses.exists():
+            return Response(
+                {"error": "No bonuses found with the provided IDs."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        updated_count = 0
+        already_paid = 0
+        errors = []
+        
+        for bonus in bonuses:
+            try:
+                if bonus.status == 'Paid':
+                    already_paid += 1
+                    continue
+                
+                bonus.status = 'Paid'
+                bonus.payment_date = payment_date
+                bonus.payment_method = payment_method
+                bonus.payment_reference = payment_reference
+                bonus.paid_by = user
+                bonus.save()
+                
+                updated_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    "bonus_id": bonus.id,
+                    "employee": bonus.employee.email,
+                    "error": str(e)
+                })
+        
+        return Response({
+            "message": f"Bonus payment status updated. {updated_count} marked as paid.",
+            "payment_type": "bonus",
+            "total_requested": len(bonus_ids),
+            "updated": updated_count,
+            "already_paid": already_paid,
+            "failed": len(errors),
+            "errors": errors
+        }, status=status.HTTP_200_OK)
