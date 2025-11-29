@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Profile, Education, Experience,Role,Page
+from .models import User, Profile, Education, Experience,Role,Page,AccountDetails
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 
@@ -89,6 +89,10 @@ class EducationSerializer(serializers.ModelSerializer):
 class ExperienceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Experience
+        exclude = ['profile']
+class AccountDetailsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AccountDetails
         exclude = ['profile']
 
 
@@ -229,7 +233,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     profile = PersonalInfoSerializer(read_only=True)
     education = EducationSerializer(many=True, read_only=True, source='profile.education')
     experience = ExperienceSerializer(many=True, read_only=True, source='profile.experience')
+    account_details = AccountDetailsSerializer(many=True, read_only=True, source='profile.account_details')
 
     class Meta:
         model = User
-        fields = ['id', 'email', 'role', 'profile', 'education', 'experience']
+        fields = ['id', 'email', 'role', 'profile', 'education', 'experience', 'account_details']

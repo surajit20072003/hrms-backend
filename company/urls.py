@@ -20,6 +20,10 @@ urlpatterns = [
     path("employees/<int:employee_pk>/experience/", EmployeeExperienceView.as_view()),
     path("employees/<int:employee_pk>/experience/<int:experience_pk>/", EmployeeExperienceDetailView.as_view()),
 
+    path("employees/<int:employee_pk>/account-details/", EmployeeAccountDetailsView.as_view()),
+    path("employees/<int:employee_pk>/account-details/<int:account_pk>/", EmployeeAccountDetailsDetailView.as_view()),
+
+
     path('warnings/', WarningListCreateView.as_view(), name='warning-list-create'),
     path('warnings/<int:pk>/', WarningDetailView.as_view(), name='warning-detail'),
     path('terminations/', TerminationListCreateView.as_view(), name='termination-list-create'),
@@ -157,6 +161,7 @@ urlpatterns = [
 
     path('payments/mark-paid/', MarkPaymentPaidView.as_view(), name='mark-payment-paid'),
 
+    path('my-payroll/', MyPayrollView.as_view(), name='my-payroll'),
 ]
 
 

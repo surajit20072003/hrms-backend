@@ -215,3 +215,33 @@ class Experience(models.Model):
 
     def __str__(self):
         return f"{self.designation} at {self.organization}"
+
+
+
+# --- Account Details Model ---
+class AccountDetails(models.Model):
+    """Bank account details for employee salary payments"""
+    
+    ACCOUNT_TYPE_CHOICES = [
+        ('Savings', 'Savings Account'),
+        ('Current', 'Current Account'),
+    ]
+    
+    profile = models.ForeignKey(Profile, on_delete=models.CASCADE, related_name='account_details')
+    account_holder_name = models.CharField(max_length=255)
+    bank_name = models.CharField(max_length=255)
+    account_number = models.CharField(max_length=50)
+    ifsc_code = models.CharField(max_length=11, help_text="Bank IFSC Code")
+    branch_name = models.CharField(max_length=255)
+    account_type = models.CharField(max_length=10, choices=ACCOUNT_TYPE_CHOICES, default='Savings')
+    is_primary = models.BooleanField(default=False, help_text="Primary account for salary payment")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Account Detail"
+        verbose_name_plural = "Account Details"
+        ordering = ['-is_primary', '-created_at']
+
+    def __str__(self):
+        return f"{self.account_holder_name} - {self.bank_name} ({self.account_number[-4:]})"

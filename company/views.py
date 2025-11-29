@@ -3,7 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser,IsAuthenticated
-from users.models import Education,Experience,User,Profile,Role
+from users.models import Education,Experience,User,Profile,Role,AccountDetails
 from .models import Department,Designation, Branch,Warning,Termination,Promotion,Holiday,WeeklyHoliday,LeaveType,EarnLeaveRule,PublicHoliday,LeaveApplication,WorkShift, LeaveBalance,\
 Attendance,Allowance,Deduction,MonthlyPayGrade,PerformanceCategory,PerformanceCriteria,EmployeePerformance,PerformanceRating,JobPost,TrainingType,EmployeeTraining,Award,Notice,LateDeductionRule,TaxRule,\
 PaySlip,PaySlipDetail,BonusSetting,EmployeeBonus
@@ -17,7 +17,8 @@ ManualAttendanceFilterSerializer,ManualAttendanceInputSerializer,AttendanceRepor
 BranchSerializer,AllowanceSerializer,DeductionSerializer,MonthlyPayGradeSerializer,HourlyPayGradeSerializer,HourlyPayGrade,PerformanceCategorySerializer,PerformanceCriteriaSerializer,\
 EmployeePerformanceSerializer,PerformanceSummarySerializer,JobPostSerializer,TrainingTypeSerializer,EmployeeTrainingSerializer,AwardSerializer,NoticeSerializer,LateDeductionRuleSerializer,TaxRuleSerializer,\
 PaySlipDetailSerializer,MonthlySalaryFilterSerializer,BulkSalaryFilterSerializer,ChangePasswordSerializer,CSVAttendanceInputSerializer,RoleSerializer,AutomaticAttendanceInputSerializer,BonusSettingSerializer,EmployeeBonusSerializer,GenerateBonusFilterSerializer,\
-MarkPaymentPaidSerializer
+MarkPaymentPaidSerializer,AccountDetailsSerializer
+from django.http import HttpResponse
 import numpy as np
 import base64
 import cv2
@@ -480,8 +481,74 @@ class EmployeeExperienceDetailView(APIView):
 
 
 
+# Account Details Views
+class EmployeeAccountDetailsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_profile(self, employee_pk):
+        return Profile.objects.get(user__pk=employee_pk)
+
+    def get(self, request, employee_pk):
+        try:
+            profile = self.get_profile(employee_pk)
+        except Profile.DoesNotExist:
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        account_details = profile.account_details.all()
+        serializer = AccountDetailsSerializer(account_details, many=True)
+        return Response(serializer.data)
+
+    def post(self, request, employee_pk):
+        try:
+            profile = self.get_profile(employee_pk)
+        except Profile.DoesNotExist:
+            return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AccountDetailsSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(profile=profile)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+class EmployeeAccountDetailsDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self, employee_pk, account_pk):
+        return AccountDetails.objects.get(pk=account_pk, profile__user__pk=employee_pk)
+
+    def get(self, request, employee_pk, account_pk):
+        try:
+            account_detail = self.get_object(employee_pk, account_pk)
+        except:
+            return Response({"error": "Account detail not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AccountDetailsSerializer(account_detail)
+        return Response(serializer.data)
+
+    def put(self, request, employee_pk, account_pk):
+        return self.patch(request, employee_pk, account_pk)
+
+    def patch(self, request, employee_pk, account_pk):
+        try:
+            account_detail = self.get_object(employee_pk, account_pk)
+        except:
+            return Response({"error": "Account detail not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = AccountDetailsSerializer(account_detail, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, employee_pk, account_pk):
+        try:
+            account_detail = self.get_object(employee_pk, account_pk)
+        except:
+            return Response({"error": "Account detail not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        account_detail.delete()
+        return Response({"message": "Account detail deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
 
 class WarningListCreateView(APIView):
     """
@@ -4206,13 +4273,13 @@ class EmployeeBonusListView(APIView):
 class MarkPaymentPaidView(APIView):
     """
     Unified endpoint to mark salary or bonus as paid.
-    POST: Update payment status to 'Paid'
+    POST: Update payment status to 'Paid' and optionally return CSV
     """
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
         """
-        POST /api/payments/mark-paid/
+        POST /api/payments/mark-paid/?export=csv  (optional query param for CSV)
         Body: {
             "payment_type": "salary",  // or "bonus"
             "item_ids": [1, 2, 3],
@@ -4233,19 +4300,27 @@ class MarkPaymentPaidView(APIView):
         payment_reference = validated_data.get('payment_reference', '')
         payment_date = validated_data.get('payment_date', date.today())
         
+        # Check if CSV export is requested
+        export_csv = request.query_params.get('export', '').lower() == 'csv'
+        
         # Step 2: Route to appropriate handler
         if payment_type == 'salary':
             return self._mark_salary_paid(
-                item_ids, payment_method, payment_reference, payment_date, request.user
+                item_ids, payment_method, payment_reference, payment_date, request.user, export_csv
             )
         else:  # bonus
             return self._mark_bonus_paid(
-                item_ids, payment_method, payment_reference, payment_date, request.user
+                item_ids, payment_method, payment_reference, payment_date, request.user, export_csv
             )
     
-    def _mark_salary_paid(self, payslip_ids, payment_method, payment_reference, payment_date, user):
-        """Mark payslips as paid"""
-        payslips = PaySlip.objects.filter(id__in=payslip_ids)
+    def _mark_salary_paid(self, payslip_ids, payment_method, payment_reference, payment_date, user, export_csv=False):
+        """Mark payslips as paid and optionally generate CSV"""
+        payslips = PaySlip.objects.filter(id__in=payslip_ids).select_related(
+            'employee__profile',
+            'employee__profile__department',
+            'employee__profile__designation',
+            'employee__profile__branch'
+        ).prefetch_related('employee__profile__account_details')
         
         if not payslips.exists():
             return Response(
@@ -4256,11 +4331,13 @@ class MarkPaymentPaidView(APIView):
         updated_count = 0
         already_paid = 0
         errors = []
+        paid_payslips = []
         
         for payslip in payslips:
             try:
                 if payslip.status == 'Paid':
                     already_paid += 1
+                    paid_payslips.append(payslip)  # Include already paid for CSV
                     continue
                 
                 payslip.status = 'Paid'
@@ -4271,6 +4348,7 @@ class MarkPaymentPaidView(APIView):
                 payslip.save()
                 
                 updated_count += 1
+                paid_payslips.append(payslip)
                 
             except Exception as e:
                 errors.append({
@@ -4278,6 +4356,10 @@ class MarkPaymentPaidView(APIView):
                     "employee": payslip.employee.email,
                     "error": str(e)
                 })
+        
+        # Generate CSV if requested
+        if export_csv and paid_payslips:
+            return self._generate_salary_csv(paid_payslips, payment_date)
         
         return Response({
             "message": f"Salary payment status updated. {updated_count} marked as paid.",
@@ -4289,9 +4371,14 @@ class MarkPaymentPaidView(APIView):
             "errors": errors
         }, status=status.HTTP_200_OK)
     
-    def _mark_bonus_paid(self, bonus_ids, payment_method, payment_reference, payment_date, user):
-        """Mark bonuses as paid"""
-        bonuses = EmployeeBonus.objects.filter(id__in=bonus_ids)
+    def _mark_bonus_paid(self, bonus_ids, payment_method, payment_reference, payment_date, user, export_csv=False):
+        """Mark bonuses as paid and optionally generate CSV"""
+        bonuses = EmployeeBonus.objects.filter(id__in=bonus_ids).select_related(
+            'employee__profile',
+            'employee__profile__department',
+            'employee__profile__designation',
+            'employee__profile__branch'
+        ).prefetch_related('employee__profile__account_details')
         
         if not bonuses.exists():
             return Response(
@@ -4302,11 +4389,13 @@ class MarkPaymentPaidView(APIView):
         updated_count = 0
         already_paid = 0
         errors = []
+        paid_bonuses = []
         
         for bonus in bonuses:
             try:
                 if bonus.status == 'Paid':
                     already_paid += 1
+                    paid_bonuses.append(bonus)  # Include already paid for CSV
                     continue
                 
                 bonus.status = 'Paid'
@@ -4317,6 +4406,7 @@ class MarkPaymentPaidView(APIView):
                 bonus.save()
                 
                 updated_count += 1
+                paid_bonuses.append(bonus)
                 
             except Exception as e:
                 errors.append({
@@ -4324,6 +4414,10 @@ class MarkPaymentPaidView(APIView):
                     "employee": bonus.employee.email,
                     "error": str(e)
                 })
+        
+        # Generate CSV if requested
+        if export_csv and paid_bonuses:
+            return self._generate_bonus_csv(paid_bonuses, payment_date)
         
         return Response({
             "message": f"Bonus payment status updated. {updated_count} marked as paid.",
@@ -4334,3 +4428,144 @@ class MarkPaymentPaidView(APIView):
             "failed": len(errors),
             "errors": errors
         }, status=status.HTTP_200_OK)
+    
+    def _generate_salary_csv(self, payslips, payment_date):
+        """Generate CSV file for salary payments"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="salary_payments_{payment_date}.csv"'
+        
+        writer = csv.writer(response)
+        
+        # CSV Headers
+        writer.writerow([
+            'Employee ID', 'Employee Name', 'Email', 'Department', 'Designation', 'Branch',
+            'Payment Month', 'Basic Salary', 'Gross Salary', 'Total Deductions', 'Net Salary',
+            'Overtime Pay', 'Tax Deduction', 'Payment Status', 'Payment Date', 'Payment Method',
+            'Payment Reference', 'Account Holder Name', 'Bank Name', 'Account Number', 
+            'IFSC Code', 'Branch Name', 'Account Type'
+        ])
+        
+        # CSV Data Rows
+        for payslip in payslips:
+            profile = payslip.employee.profile
+            
+            # Get primary account details
+            primary_account = profile.account_details.filter(is_primary=True).first()
+            if not primary_account:
+                primary_account = profile.account_details.first()
+            
+            writer.writerow([
+                profile.employee_id or 'N/A',
+                profile.full_name,
+                payslip.employee.email,
+                profile.department.name if profile.department else 'N/A',
+                profile.designation.name if profile.designation else 'N/A',
+                profile.branch.name if profile.branch else 'N/A',
+                payslip.payment_month.strftime('%Y-%m'),
+                payslip.basic_salary,
+                payslip.gross_salary,
+                payslip.total_deductions,
+                payslip.net_salary,
+                payslip.total_overtime_pay or 0,
+                payslip.total_tax_deduction or 0,
+                payslip.status,
+                payslip.payment_date.strftime('%Y-%m-%d') if payslip.payment_date else 'N/A',
+                payslip.payment_method or 'N/A',
+                payslip.payment_reference or 'N/A',
+                primary_account.account_holder_name if primary_account else 'N/A',
+                primary_account.bank_name if primary_account else 'N/A',
+                primary_account.account_number if primary_account else 'N/A',
+                primary_account.ifsc_code if primary_account else 'N/A',
+                primary_account.branch_name if primary_account else 'N/A',
+                primary_account.account_type if primary_account else 'N/A',
+            ])
+        
+        return response
+    
+    def _generate_bonus_csv(self, bonuses, payment_date):
+        """Generate CSV file for bonus payments"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="bonus_payments_{payment_date}.csv"'
+        
+        writer = csv.writer(response)
+        
+        # CSV Headers
+        writer.writerow([
+            'Employee ID', 'Employee Name', 'Email', 'Department', 'Designation', 'Branch',
+            'Bonus Month', 'Bonus Amount', 'Bonus Type', 'Payment Status', 'Payment Date', 
+            'Payment Method', 'Payment Reference', 'Account Holder Name', 'Bank Name', 
+            'Account Number', 'IFSC Code', 'Branch Name', 'Account Type'
+        ])
+        
+        # CSV Data Rows
+        for bonus in bonuses:
+            profile = bonus.employee.profile
+            
+            # Get primary account details
+            primary_account = profile.account_details.filter(is_primary=True).first()
+            if not primary_account:
+                primary_account = profile.account_details.first()
+            
+            writer.writerow([
+                profile.employee_id or 'N/A',
+                profile.full_name,
+                bonus.employee.email,
+                profile.department.name if profile.department else 'N/A',
+                profile.designation.name if profile.designation else 'N/A',
+                profile.branch.name if profile.branch else 'N/A',
+                bonus.bonus_month.strftime('%Y-%m'),
+                bonus.bonus_amount,
+                bonus.bonus_type or 'N/A',
+                bonus.status,
+                bonus.payment_date.strftime('%Y-%m-%d') if bonus.payment_date else 'N/A',
+                bonus.payment_method or 'N/A',
+                bonus.payment_reference or 'N/A',
+                primary_account.account_holder_name if primary_account else 'N/A',
+                primary_account.bank_name if primary_account else 'N/A',
+                primary_account.account_number if primary_account else 'N/A',
+                primary_account.ifsc_code if primary_account else 'N/A',
+                primary_account.branch_name if primary_account else 'N/A',
+                primary_account.account_type if primary_account else 'N/A',
+            ])
+        
+        return response
+
+
+class MyPayrollView(APIView):
+    """Employee's own payroll history"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        employee = request.user
+        queryset = PaySlip.objects.filter(
+            employee=employee,
+            status='Paid'  # Only show paid payslips
+        ).select_related(
+            'employee__profile', 'employee__profile__monthly_pay_grade',
+            'employee__profile__hourly_pay_grade'
+        ).order_by('-payment_month')
+        
+        paginator = StandardResultsSetPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        output = []
+        for payslip in page:
+            profile = employee.profile
+            pay_grade_name = "N/A"
+            if profile.monthly_pay_grade:
+                pay_grade_name = profile.monthly_pay_grade.grade_name
+            elif profile.hourly_pay_grade:
+                pay_grade_name = profile.hourly_pay_grade.pay_grade_name
+            
+            output.append({
+                "payslip_id": payslip.pk,
+                "month": payslip.payment_month.strftime('%B %Y'),
+                "employee_name": profile.full_name,
+                "photo": request.build_absolute_uri(profile.photo.url) if profile.photo else None,
+                "pay_grade": pay_grade_name,
+                "basic_salary": payslip.basic_salary,
+                "gross_salary": payslip.gross_salary,
+                "status": payslip.status,
+            })
+        
+        return paginator.get_paginated_response(output)
