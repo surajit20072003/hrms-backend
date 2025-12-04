@@ -118,6 +118,18 @@ class User(AbstractUser):
             self.is_staff = True # Superuser should always have staff access
         
     @property
+    def accessible_pages(self):
+        """
+        Returns all pages accessible to this user.
+        Superusers get all pages, regular users get pages from their role.
+        """
+        if self.is_superuser:
+            return Page.objects.all()
+        elif self.role:
+            return self.role.pages.all()
+        return Page.objects.none()
+    
+    @property
     def is_super_admin(self):
         # Tier 1: Highest access
         return self.is_superuser

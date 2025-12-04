@@ -1213,21 +1213,11 @@ class PaySlipDetailSerializer(serializers.ModelSerializer):
     Final PaySlip Detail (salary03.png) ke liye.
     """
     
-    # Profile Details
+    # Profile Details (Source path adjust karein agar employee.profile relation alag hai)
     employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
     department = serializers.CharField(source='employee.profile.department.name', read_only=True)
     designation = serializers.CharField(source='employee.profile.designation.name', read_only=True)
-    date_of_joining = serializers.DateField(source='employee.profile.date_of_joining', read_only=True)
     
-    # Pay Grade Details
-    pay_grade_name = serializers.SerializerMethodField()
-    pay_grade_type = serializers.SerializerMethodField()
-    
-    # Hourly Employee Specific Fields
-    hourly_rate = serializers.SerializerMethodField()
-    total_working_hours = serializers.SerializerMethodField()
-    
-    # Existing Fields
     per_day_salary = serializers.SerializerMethodField()
     allowance_breakdown = serializers.SerializerMethodField()
     deduction_breakdown = serializers.SerializerMethodField()
@@ -1235,53 +1225,15 @@ class PaySlipDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaySlip
         fields = [
-            'id', 'employee_name', 'department', 'designation', 'date_of_joining',
-            'payment_month', 'pay_grade_name', 'pay_grade_type',
+            'id', 'employee_name', 'department', 'designation', 'payment_month', 
             'total_days_in_month', 
             'working_days', # Total PAID Days
             'unjustified_absence', # Total UNPAID Days
             'late_attendance_count','total_overtime_pay',      
             'total_tax_deduction',
             'basic_salary', 'total_allowances', 'total_deductions', 'gross_salary', 'net_salary',
-            'per_day_salary', 'hourly_rate', 'total_working_hours',
-            'status', 'allowance_breakdown', 'deduction_breakdown'
+            'per_day_salary', 'status', 'allowance_breakdown', 'deduction_breakdown'
         ]
-    
-    def get_pay_grade_name(self, obj):
-        """Get pay grade name (Monthly or Hourly)"""
-        profile = obj.employee.profile
-        if profile.monthly_pay_grade:
-            return profile.monthly_pay_grade.grade_name
-        elif profile.hourly_pay_grade:
-            return profile.hourly_pay_grade.pay_grade_name
-        return "N/A"
-    
-    def get_pay_grade_type(self, obj):
-        """Get pay grade type (Monthly or Hourly)"""
-        profile = obj.employee.profile
-        if profile.monthly_pay_grade:
-            return "Monthly"
-        elif profile.hourly_pay_grade:
-            return "Hourly"
-        return "N/A"
-    
-    def get_hourly_rate(self, obj):
-        """Get hourly rate for hourly employees"""
-        profile = obj.employee.profile
-        if profile.hourly_pay_grade:
-            return float(profile.hourly_pay_grade.hourly_rate)
-        return None
-    
-    def get_total_working_hours(self, obj):
-        """Calculate total working hours for hourly employees"""
-        profile = obj.employee.profile
-        if profile.hourly_pay_grade and obj.basic_salary and profile.hourly_pay_grade.hourly_rate:
-            # Basic salary / hourly rate = total hours worked
-            total_hours = obj.basic_salary / profile.hourly_pay_grade.hourly_rate
-            hours = int(total_hours)
-            minutes = int((total_hours - hours) * 60)
-            return f"{hours}:{minutes:02d}"
-        return None
         
     def get_per_day_salary(self, obj):
         """ Calculate Master Basic Salary per Paid Day for Pro-rata visibility. """
