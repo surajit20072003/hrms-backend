@@ -5,7 +5,27 @@ from decimal import Decimal
 from users.enums import JOB_STATUS_CHOICES,AwardName,SlabChoices,GenderChoices
 
 class Department(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)  # Removed unique=True for multi-tenancy
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='departments_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this department"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='departments_created'
+    )
+    class Meta:
+        unique_together = ('parent', 'name')  # Unique per company
+        verbose_name = "Department"
+        verbose_name_plural = "Departments"
+        ordering = ['name']
 
     def __str__(self):
         return self.name
@@ -14,12 +34,54 @@ class Designation(models.Model):
     name = models.CharField(max_length=100)
     # Har designation ko ek department se joda gaya hai
     department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='designations')
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='designations_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this designation"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='designations_created'
+    )
+
+    class Meta:
+        unique_together = ('parent', 'name', 'department')  # Unique per company per department
+        verbose_name = "Designation"
+        verbose_name_plural = "Designations"
+        ordering = ['name']
 
     def __str__(self):
         return self.name
     
 class Branch(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)  # Removed unique=True
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='branches_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this branch"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='branches_created'
+    )
+
+    class Meta:
+        unique_together = ('parent', 'name')  # Unique per company
+        verbose_name = "Branch"
+        verbose_name_plural = "Branches"
+        ordering = ['name']
 
     def __str__(self):
         return self.name
@@ -45,6 +107,13 @@ class Warning(models.Model):
     subject = models.CharField(max_length=255)
     warning_date = models.DateField()
     description = models.TextField()
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='warnings_created'
+    )
 
     def __str__(self):
         return f"Warning for {self.warning_to.email} - {self.subject}"
@@ -67,6 +136,13 @@ class Termination(models.Model):
     notice_date = models.DateField()
     description = models.TextField()
     subject = models.CharField(max_length=255)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='terminations_created'
+    )
 
     def __str__(self):
         return f"Termination for {self.terminate_to.email}"
@@ -81,20 +157,49 @@ class Promotion(models.Model):
     current_salary = models.CharField(max_length=50)
     current_pay_grade = models.CharField(max_length=100, null=True, blank=True) 
 
-    # Promoted details
+    # Promoted details5
     promoted_department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, related_name='promoted_employees')
     promoted_designation = models.ForeignKey(Designation, on_delete=models.SET_NULL, null=True, related_name='promoted_employees')
     promoted_pay_grade = models.CharField(max_length=100, null=True, blank=True)
     promoted_salary = models.CharField(max_length=50)
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='promotions_created'
+    )    
     description = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f"Promotion for {self.employee.email} on {self.promotion_date}"
 
 class Holiday(models.Model):
-    name = models.CharField(max_length=100, unique=True, help_text="e.g., Christmas, Diwali")
-    def __str__(self): return self.name
+    name = models.CharField(max_length=100, help_text="e.g., Christmas, Diwali")  # Removed unique=True
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='holidays_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this holiday"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='holidays_created'
+    )
+    
+    class Meta:
+        unique_together = ('parent', 'name')  # Unique per company
+        verbose_name = "Holiday"
+        verbose_name_plural = "Holidays"
+        ordering = ['name']
+    
+    def __str__(self): 
+        return self.name
 
 # Model for "Public Holiday" (Naam ko date assign karega)
 class PublicHoliday(models.Model):
@@ -102,22 +207,98 @@ class PublicHoliday(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     comment = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='public_holidays_created'
+    )
     def __str__(self): return f"{self.holiday.name} ({self.start_date})"
 
 # Baaki models waise hi rahenge
 class WeeklyHoliday(models.Model):
-    day = models.CharField(max_length=10, choices=DayOfWeek.choices, unique=True)
+    day = models.CharField(max_length=10, choices=DayOfWeek.choices)  # Removed unique=True
     is_active = models.BooleanField(default=True)
-    def __str__(self): return self.day
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='weekly_holidays_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this weekly holiday"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='weekly_holidays_created'
+    )
+    
+    class Meta:
+        unique_together = ('parent', 'day')  # Unique per company
+        verbose_name = "Weekly Holiday"
+        verbose_name_plural = "Weekly Holidays"
+        ordering = ['day']
+    
+    def __str__(self): 
+        return self.day
 
 class LeaveType(models.Model):
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)  # Removed unique=True
     number_of_days = models.PositiveIntegerField()
-    def __str__(self): return self.name
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='leave_types_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this leave type"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='leave_types_created'
+    )
+    
+    class Meta:
+        unique_together = ('parent', 'name')  # Unique per company
+        verbose_name = "Leave Type"
+        verbose_name_plural = "Leave Types"
+        ordering = ['name']
+    
+    def __str__(self): 
+        return self.name
 
 class EarnLeaveRule(models.Model):
-    for_month = models.PositiveIntegerField(default=1)
-    day_of_earn_leave = models.FloatField(default=1.0)
+    for_month = models.PositiveIntegerField(default=1, editable=False)  # ✅ Fixed at 1 month
+    day_of_earn_leave = models.FloatField(default=0)  # ✅ Default 0, editable
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='earn_leave_rules_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this earn leave rule"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='earn_leave_rules_created'
+    )
+    
+    class Meta:
+        verbose_name = "Earn Leave Rule"
+        verbose_name_plural = "Earn Leave Rules"
+        unique_together = ('parent',)  # ✅ Only one rule per company
+    
+    def __str__(self):
+        return f"{self.day_of_earn_leave} days per {self.for_month} month(s)"
     
 class LeaveApplication(models.Model):
     employee = models.ForeignKey(
@@ -159,6 +340,13 @@ class LeaveApplication(models.Model):
     reject_date = models.DateField(null=True, blank=True)
 
     rejection_reason = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='leave_applications_created'
+    )
 
     def __str__(self):
         return f"{self.employee.email} - {self.leave_type} ({self.status})"
@@ -186,7 +374,13 @@ class LeaveBalance(models.Model):
         default=0.0, 
         help_text="Current balance available to the employee."
     )
-
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='leave_balances_created'
+    )   
     class Meta:
         # Ensures an employee has only one balance record per leave type
         unique_together = ('employee', 'leave_type')
@@ -201,7 +395,7 @@ class LeaveBalance(models.Model):
 
 class WorkShift(models.Model):
     """Stores different work shifts defined by the company."""
-    shift_name = models.CharField(max_length=100, unique=True, verbose_name="Work Shift Name")
+    shift_name = models.CharField(max_length=100, verbose_name="Work Shift Name")  # Removed unique=True
     start_time = models.TimeField(verbose_name="Start Time") # e.g., 09:00:00
     end_time = models.TimeField(verbose_name="End Time")     # e.g., 18:00:00
     
@@ -211,7 +405,21 @@ class WorkShift(models.Model):
         default=60, # Default: 30 minutes grace period
         verbose_name="OT Start Delay (Minutes)"
     )
-
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='work_shifts_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this work shift"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='work_shifts_created'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -219,6 +427,7 @@ class WorkShift(models.Model):
         return self.shift_name
 
     class Meta:
+        unique_together = ('parent', 'shift_name')  # Unique per company
         verbose_name = "Work Shift"
         verbose_name_plural = "Work Shifts"
         ordering = ['start_time']
@@ -248,6 +457,13 @@ class Attendance(models.Model):
     total_work_duration = models.DurationField(null=True, blank=True)
     overtime_duration = models.DurationField(null=True, blank=True)
     late_duration = models.DurationField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='attendances_created'
+    )
 
 
     class Meta:
@@ -264,7 +480,7 @@ class Allowance(models.Model):
         PERCENTAGE = 'Percentage', 'Percentage of Basic'
         FIXED = 'Fixed', 'Fixed Amount'
 
-    allowance_name = models.CharField(max_length=100, unique=True, verbose_name="Allowance Name")
+    allowance_name = models.CharField(max_length=100, verbose_name="Allowance Name")  # Removed unique=True
     allowance_type = models.CharField(
         max_length=10,
         choices=AllowanceType.choices,
@@ -283,14 +499,31 @@ class Allowance(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True, 
         verbose_name="Limit Per Month"
     )
+    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='allowances_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this allowance"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='allowances_created'
+    )
 
     def __str__(self):
         return self.allowance_name
 
     class Meta:
+        unique_together = ('parent', 'allowance_name')  # Unique per company
         verbose_name = "Allowance"
         verbose_name_plural = "Allowances"
         ordering = ['allowance_name']
@@ -303,7 +536,7 @@ class Deduction(models.Model):
         PERCENTAGE = 'Percentage', 'Percentage of Basic'
         FIXED = 'Fixed', 'Fixed Amount'
 
-    deduction_name = models.CharField(max_length=100, unique=True, verbose_name="Deduction Name")
+    deduction_name = models.CharField(max_length=100, verbose_name="Deduction Name")  # Removed unique=True
     deduction_type = models.CharField(
         max_length=10,
         choices=DeductionType.choices,
@@ -325,14 +558,31 @@ class Deduction(models.Model):
     )
     
     is_tax_exempt = models.BooleanField(default=False, verbose_name="Is Tax Exempt")
+    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='deductions_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this deduction"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='deductions_created'
+    )
 
     def __str__(self):
         return self.deduction_name
 
     class Meta:
+        unique_together = ('parent', 'deduction_name')  # Unique per company
         verbose_name = "Deduction"
         verbose_name_plural = "Deductions"
         ordering = ['deduction_name']
@@ -342,7 +592,7 @@ class Deduction(models.Model):
 
 
 class MonthlyPayGrade(models.Model):
-    grade_name = models.CharField(max_length=100, unique=True, verbose_name="Grade Name")
+    grade_name = models.CharField(max_length=100, verbose_name="Grade Name")  # Removed unique=True for multi-tenancy
     
     # Input Field (Admin sets this value)
     basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
@@ -373,6 +623,27 @@ class MonthlyPayGrade(models.Model):
         through='PayGradeDeduction', 
         related_name='pay_grades'
     )
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='monthly_pay_grades_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this monthly pay grade"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='monthly_pay_grades_created'
+    )
+    
+    class Meta:
+        unique_together = ('parent', 'grade_name')  # Unique per company
+        verbose_name = "Monthly Pay Grade"
+        verbose_name_plural = "Monthly Pay Grades"
+        ordering = ['grade_name']
     
     def __str__(self):
         return self.grade_name
@@ -383,7 +654,13 @@ class PayGradeAllowance(models.Model):
     pay_grade = models.ForeignKey(MonthlyPayGrade, on_delete=models.CASCADE)
     allowance = models.ForeignKey('Allowance', on_delete=models.CASCADE) # Reuse: Allowance Model ka use
     value = models.DecimalField(max_digits=6, decimal_places=2, default=0.00, verbose_name="Grade Specific Value")
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pay_grade_allowances_created'
+    )
     class Meta:
         unique_together = ('pay_grade', 'allowance')
 
@@ -392,7 +669,13 @@ class PayGradeDeduction(models.Model):
     pay_grade = models.ForeignKey(MonthlyPayGrade, on_delete=models.CASCADE)
     deduction = models.ForeignKey('Deduction', on_delete=models.CASCADE) # Reuse: Deduction Model ka use
     value = models.DecimalField(max_digits=6, decimal_places=2, default=0.00, verbose_name="Grade Specific Value")
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pay_grade_deductions_created'
+    )    
     class Meta:
         unique_together = ('pay_grade', 'deduction')
 
@@ -400,28 +683,65 @@ class PayGradeDeduction(models.Model):
 class HourlyPayGrade(models.Model):
     """Defines a pay grade structure based on an hourly rate."""
     
-    pay_grade_name = models.CharField(max_length=100, unique=True, verbose_name="Pay Grade Name")
+    pay_grade_name = models.CharField(max_length=100, verbose_name="Pay Grade Name")  # Removed unique=True for multi-tenancy
     
     hourly_rate = models.DecimalField(
         max_digits=8, decimal_places=2, default=0.00,
         verbose_name="Hourly Rate"
     )
-    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='hourly_pay_grades_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this hourly pay grade"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='hourly_pay_grades_created'
+    )
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.pay_grade_name} ({self.hourly_rate}/hr)"
 
     class Meta:
+        unique_together = ('parent', 'pay_grade_name')  # Unique per company
         verbose_name = "Hourly Pay Grade"
+        verbose_name_plural = "Hourly Pay Grades"
         ordering = ['pay_grade_name']
 
 
 class PerformanceCategory(models.Model):
-    category_name = models.CharField(max_length=150, unique=True)
+    category_name = models.CharField(max_length=150)  # Removed unique=True for multi-tenancy
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='performance_categories_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this performance category"
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='performance_categories_created'
+    )
+    
+    class Meta:
+        unique_together = ('parent', 'category_name')  # Unique per company
+        verbose_name = "Performance Category"
+        verbose_name_plural = "Performance Categories"
+        ordering = ['category_name']
+    
     def __str__(self):
         return self.category_name
     
@@ -436,22 +756,41 @@ class PerformanceCriteria(models.Model):
     
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='performance_criteria_created'
+    )
+    
+    class Meta:
+        unique_together = ('category', 'criteria_name')  # Unique criteria name per category
+        verbose_name = "Performance Criteria"
+        verbose_name_plural = "Performance Criteria"
+        ordering = ['category', 'criteria_name']
+    
     def __str__(self):
         return f"{self.category.category_name}: {self.criteria_name}"
     
 
 class EmployeePerformance(models.Model):
-    # Foreign Key to Employee (Aapke users/models.py se)
+    # Foreign Key to Employee (User model for consistency)
     employee = models.ForeignKey(
-        'users.Profile', 
+        'users.User', 
         on_delete=models.CASCADE,
         related_name='performance_reviews'
     )
     # Kis mahine ki performance hai (Format: YYYY-MM-DD, day 1 ho sakta hai)
     review_month = models.DateField() 
     remarks = models.TextField(blank=True, null=True)
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_performances_created'
+    )
     # Optional: Calculated Overall Rating (Average of all criteria)
     overall_rating = models.DecimalField(
         max_digits=3, 
@@ -473,7 +812,7 @@ class EmployeePerformance(models.Model):
         unique_together = ('employee', 'review_month') 
 
     def __str__(self):
-        return f"{self.employee.full_name}'s Review for {self.review_month.strftime('%Y-%m')}"
+        return f"{self.employee.profile.full_name}'s Review for {self.review_month.strftime('%Y-%m')}"
 
 
 
@@ -495,6 +834,13 @@ class PerformanceRating(models.Model):
     class Meta:
         # Ek review mein ek criteria ko sirf ek baar rate kiya ja sakta hai
         unique_together = ('performance_review', 'criteria')
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='performance_ratings_created'
+    )
     
     def __str__(self):
         return f"{self.criteria.criteria_name}: {self.rating_value}"
@@ -514,10 +860,16 @@ class JobPost(models.Model):
         default='DRAFT'
     )
     
-    
     job_publish_date = models.DateField(null=True, blank=True)
     application_end_date = models.DateField() # Mandatory field
     
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='job_posts_created'
+    )    
 
     published_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -525,6 +877,15 @@ class JobPost(models.Model):
         null=True,
         blank=True,
         related_name='job_posts'
+    )
+    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='job_posts_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this job post"
     )
     
     # Audit fields
@@ -555,10 +916,27 @@ class TrainingType(models.Model):
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='training_types_created'
+    )
+    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='training_types_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this training type"
+    )
 
     class Meta:
         verbose_name = "Training Type"
         verbose_name_plural = "Training Types"
+        unique_together = ('parent', 'training_type_name')
         ordering = ['training_type_name']
 
     def __str__(self):
@@ -571,9 +949,16 @@ class EmployeeTraining(models.Model):
     """
     # Foreign Keys (Dropdowns from etl02.png)
     employee = models.ForeignKey(
-        'users.Profile', # Assuming Employee details are in the Profile model
+        'users.User',  # Changed to User for consistency
         on_delete=models.CASCADE,
         related_name='trainings_attended'
+    )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_trainings_created'
     )
     training_type = models.ForeignKey(
         'TrainingType', 
@@ -608,7 +993,7 @@ class EmployeeTraining(models.Model):
         ordering = ['-from_date']
 
     def __str__(self):
-        return f"{self.employee.full_name} - {self.subject}"
+        return f"{self.employee.profile.full_name} - {self.subject}"
     
 
 class Award(models.Model):
@@ -617,7 +1002,7 @@ class Award(models.Model):
     """
     # Foreign Key
     employee = models.ForeignKey(
-        'users.Profile', # Employee name dropdown
+        'users.User',  # Changed to User for consistency
         on_delete=models.CASCADE,
         related_name='awards_received'
     )
@@ -633,6 +1018,13 @@ class Award(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='awards_created'
+    )
 
     class Meta:
         verbose_name = "Employee Award"
@@ -642,7 +1034,7 @@ class Award(models.Model):
 
     def __str__(self):
         # Enum value ko human-readable label mein convert karega
-        return f"{self.employee.full_name} - {self.get_award_name_display()} ({self.award_month.strftime('%B %Y')})"
+        return f"{self.employee.profile.full_name} - {self.get_award_name_display()} ({self.award_month.strftime('%B %Y')})"
     
 class Notice(models.Model):
     """
@@ -670,6 +1062,22 @@ class Notice(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='notices_created'
+    )
+    
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='notices_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this notice"
+    )
 
     class Meta:
         verbose_name = "Notice"
@@ -707,11 +1115,28 @@ class LateDeductionRule(models.Model):
         default=Status.ACTIVE,
         verbose_name="Status"
     )
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='late_deduction_rules_created'
+    )
     
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='late_deduction_rules_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this rule"
+    )
+
     class Meta:
         ordering = ['late_days_threshold']
         verbose_name = "Late Deduction Rule"
         verbose_name_plural = "Late Deduction Rules"
+        unique_together = ('parent', 'late_days_threshold')
 
     def __str__(self):
         return f"{self.late_days_threshold} Late Days -> {self.deduction_days} Day Cut ({self.status})"
@@ -753,9 +1178,25 @@ class TaxRule(models.Model):
     )
     
     is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tax_rules_created'
+    )
     
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='tax_rules_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this tax rule"
+    )
+
     class Meta:
-        unique_together = ('gender', 'total_income_limit') 
+        unique_together = ('parent', 'gender', 'total_income_limit') 
         ordering = ['gender', 'total_income_limit']
         verbose_name = "Tax Rule"
         verbose_name_plural = "Tax Rules"
@@ -826,7 +1267,13 @@ class PaySlip(models.Model):
         related_name='salary_payments_made',
         help_text="User who marked this as paid"
     )
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='payslips_created'
+    )
     class Meta:
         unique_together = ('employee', 'payment_month')
         ordering = ['-payment_month']
@@ -845,7 +1292,13 @@ class PaySlipDetail(models.Model):
     item_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     item_name = models.CharField(max_length=100) # e.g., HRA, PF, Late Attendance Cut, Unjustified Absence Cut
     amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='payslip_details_created'
+    )
     class Meta:
         ordering = ['item_type', 'item_name']
 
@@ -856,7 +1309,7 @@ class BonusSetting(models.Model):
     """
     Defines bonus rules for festivals (e.g., Eid bonus 50% of Basic)
     """
-    festival_name = models.CharField(max_length=100, unique=True, verbose_name="Festival Name")
+    festival_name = models.CharField(max_length=100, verbose_name="Festival Name")  # Removed unique=True for multi-tenancy
     percentage_of_basic = models.DecimalField(
         max_digits=5, 
         decimal_places=2, 
@@ -875,11 +1328,28 @@ class BonusSetting(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bonus_settings_created'
+    )
     
+    parent = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='bonus_settings_owned',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this bonus setting"
+    )
+
     class Meta:
         verbose_name = "Bonus Setting"
         verbose_name_plural = "Bonus Settings"
         ordering = ['festival_name']
+        unique_together = ('parent', 'festival_name')
     
     def __str__(self):
         return f"{self.festival_name} ({self.percentage_of_basic}% of {self.calculate_on})"
@@ -956,7 +1426,13 @@ class EmployeeBonus(models.Model):
         help_text="User who marked this bonus as paid"
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='employee_bonuses_created'
+    )
     class Meta:
         unique_together = ('employee', 'festival_name', 'bonus_month')
         ordering = ['-bonus_month', '-created_at']

@@ -47,7 +47,13 @@ class DepartmentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = Department.objects.all().order_by('name')   
+        from company.utils import filter_by_company
+        
+        queryset = Department.objects.all().order_by('name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+        
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(name__icontains=search_query)
@@ -60,14 +66,14 @@ class DepartmentListCreateView(APIView):
         
         # 4. Serialization
         # Serializer ko sirf current page ke items par apply karein
-        serializer = DepartmentSerializer(page, many=True)
+        serializer = DepartmentSerializer(page, many=True, context={'request': request})
         
         # 5. Response mein paginated data return karna
         # Yeh method metadata (count, next, previous) ke saath data return karta hai
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = DepartmentSerializer(data=request.data)
+        serializer = DepartmentSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -81,19 +87,28 @@ class DepartmentDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return Department.objects.get(pk=pk)
+            # Filter by company
+            departments = Department.objects.filter(pk=pk)
+            departments = filter_by_company(departments, self.request.user)
+            department = departments.first()
+            
+            if not department:
+                raise Http404
+            return department
         except Department.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         department = self.get_object(pk)
-        serializer = DepartmentSerializer(department)
+        serializer = DepartmentSerializer(department, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         department = self.get_object(pk)
-        serializer = DepartmentSerializer(department, data=request.data)
+        serializer = DepartmentSerializer(department, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -101,7 +116,7 @@ class DepartmentDetailView(APIView):
     
     def patch(self, request, pk):
         department = self.get_object(pk)
-        serializer = DepartmentSerializer(department, data=request.data, partial=True)
+        serializer = DepartmentSerializer(department, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -120,8 +135,12 @@ class DesignationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_company
         
         queryset = Designation.objects.select_related('department').all().order_by('department__name', 'name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
         
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -133,12 +152,12 @@ class DesignationListCreateView(APIView):
         
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = DesignationSerializer(page, many=True)
+        serializer = DesignationSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = DesignationSerializer(data=request.data)
+        serializer = DesignationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -152,19 +171,27 @@ class DesignationDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return Designation.objects.get(pk=pk)
+            designations = Designation.objects.filter(pk=pk)
+            designations = filter_by_company(designations, self.request.user)
+            designation = designations.first()
+            
+            if not designation:
+                raise Http404
+            return designation
         except Designation.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         designation = self.get_object(pk)
-        serializer = DesignationSerializer(designation)
+        serializer = DesignationSerializer(designation, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         designation = self.get_object(pk)
-        serializer = DesignationSerializer(designation, data=request.data)
+        serializer = DesignationSerializer(designation, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -181,8 +208,12 @@ class BranchListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_company
         
         queryset = Branch.objects.all().order_by('name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
         
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -194,12 +225,12 @@ class BranchListCreateView(APIView):
         
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = BranchSerializer(page, many=True)
+        serializer = BranchSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = BranchSerializer(data=request.data)
+        serializer = BranchSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -210,19 +241,27 @@ class BranchDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return Branch.objects.get(pk=pk)
+            branches = Branch.objects.filter(pk=pk)
+            branches = filter_by_company(branches, self.request.user)
+            branch = branches.first()
+            
+            if not branch:
+                raise Http404
+            return branch
         except Branch.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         branch = self.get_object(pk)
-        serializer = BranchSerializer(branch)
+        serializer = BranchSerializer(branch, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         branch = self.get_object(pk)
-        serializer = BranchSerializer(branch, data=request.data)
+        serializer = BranchSerializer(branch, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -236,7 +275,12 @@ class BranchDetailView(APIView):
 class EmployeeListView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        # 1. Fetch ALL Profiles (no role restriction here)
+        from company.utils import get_company_users
+        
+        # 1. Get company users (includes owner + employees)
+        company_users = get_company_users(request.user)
+        
+        # 2. Fetch Profiles for company users
         queryset = Profile.objects.select_related(
             'user', 
             'department', 
@@ -244,13 +288,12 @@ class EmployeeListView(APIView):
             'monthly_pay_grade', 
             'hourly_pay_grade',
             'branch'
-        ).all().order_by('first_name')
+        ).filter(user__in=company_users).order_by('first_name')
         
-        # 2. Filtering Logic (Role filter uses iexact which is okay for text field)
+        # 3. Filtering Logic
         role_filter = request.query_params.get('role', None)
         if role_filter:
-            # Filter works regardless of the role string used (e.g., 'Employe' or 'Admin')
-            queryset = queryset.filter(user__role__iexact=role_filter)
+            queryset = queryset.filter(user__role__name__iexact=role_filter)
             
         # Filter by Department ID
         department_id = request.query_params.get('department_id', None)
@@ -262,13 +305,12 @@ class EmployeeListView(APIView):
         if designation_id:
             queryset = queryset.filter(designation_id=designation_id)
 
-        # Filter by Status (Active/Inactive, Profile ka status)
+        # Filter by Status
         status_filter = request.query_params.get('status', None)
         if status_filter:
             queryset = queryset.filter(status__iexact=status_filter)
 
-
-        # 3. Search Logic
+        # 4. Search Logic
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
@@ -277,21 +319,21 @@ class EmployeeListView(APIView):
                 Q(employee_id__icontains=search_query) 
             )
             
-        # 4. Pagination Apply karna
+        # 5. Pagination
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        # 5. Serialization
-        serializer = EmployeeListSerializer(page, many=True)
+        # 6. Serialization
+        serializer = EmployeeListSerializer(page, many=True, context={'request': request})
         
-        # 6. Response mein paginated data return karna
+        # 7. Response
         return paginator.get_paginated_response(serializer.data)
 
 class EmployeeCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        serializer = EmployeeCreateSerializer(data=request.data)
+        serializer = EmployeeCreateSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response({"message": "Employee created successfully."}, status=status.HTTP_201_CREATED)
@@ -304,8 +346,20 @@ class EmployeeDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import get_company_users
+        
         try:
-            return Profile.objects.get(user__pk=pk)
+            # Get company users to verify access
+            company_users = get_company_users(self.request.user)
+            
+            # Fetch profile and verify it belongs to company
+            profile = Profile.objects.select_related('user').get(user__pk=pk)
+            
+            # Check if user belongs to the same company
+            if profile.user not in company_users:
+                raise Http404
+                
+            return profile
         except Profile.DoesNotExist:
             raise Http404
 
@@ -343,7 +397,20 @@ class EmployeeEducationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_profile(self, employee_pk):
-        return Profile.objects.get(user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            profile = Profile.objects.select_related('user').get(user__pk=employee_pk)
+            
+            if profile.user not in company_users:
+                raise Profile.DoesNotExist
+                
+            return profile
+        except Profile.DoesNotExist:
+            raise Profile.DoesNotExist
 
     # GET: All Education + POST: New Education
     def get(self, request, employee_pk):
@@ -362,7 +429,7 @@ class EmployeeEducationView(APIView):
         except Profile.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = EducationSerializer(data=request.data)
+        serializer = EducationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(profile=profile)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -373,7 +440,23 @@ class EmployeeEducationDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, employee_pk, education_pk):
-        return Education.objects.get(pk=education_pk, profile__user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            education = Education.objects.select_related('profile__user').get(
+                pk=education_pk, 
+                profile__user__pk=employee_pk
+            )
+            
+            if education.profile.user not in company_users:
+                raise Education.DoesNotExist
+                
+            return education
+        except Education.DoesNotExist:
+            raise Education.DoesNotExist
 
     # GET: Single Education
     def get(self, request, employee_pk, education_pk):
@@ -415,7 +498,20 @@ class EmployeeExperienceView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_profile(self, employee_pk):
-        return Profile.objects.get(user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            profile = Profile.objects.select_related('user').get(user__pk=employee_pk)
+            
+            if profile.user not in company_users:
+                raise Profile.DoesNotExist
+                
+            return profile
+        except Profile.DoesNotExist:
+            raise Profile.DoesNotExist
 
     def get(self, request, employee_pk):
         try:
@@ -433,7 +529,7 @@ class EmployeeExperienceView(APIView):
         except Profile.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = ExperienceSerializer(data=request.data)
+        serializer = ExperienceSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(profile=profile)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -444,7 +540,23 @@ class EmployeeExperienceDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, employee_pk, experience_pk):
-        return Experience.objects.get(pk=experience_pk, profile__user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            experience = Experience.objects.select_related('profile__user').get(
+                pk=experience_pk, 
+                profile__user__pk=employee_pk
+            )
+            
+            if experience.profile.user not in company_users:
+                raise Experience.DoesNotExist
+                
+            return experience
+        except Experience.DoesNotExist:
+            raise Experience.DoesNotExist
 
     def get(self, request, employee_pk, experience_pk):
         try:
@@ -486,7 +598,20 @@ class EmployeeAccountDetailsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_profile(self, employee_pk):
-        return Profile.objects.get(user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            profile = Profile.objects.select_related('user').get(user__pk=employee_pk)
+            
+            if profile.user not in company_users:
+                raise Profile.DoesNotExist
+                
+            return profile
+        except Profile.DoesNotExist:
+            raise Profile.DoesNotExist
 
     def get(self, request, employee_pk):
         try:
@@ -504,7 +629,7 @@ class EmployeeAccountDetailsView(APIView):
         except Profile.DoesNotExist:
             return Response({"error": "Employee profile not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        serializer = AccountDetailsSerializer(data=request.data)
+        serializer = AccountDetailsSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save(profile=profile)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -515,7 +640,23 @@ class EmployeeAccountDetailsDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, employee_pk, account_pk):
-        return AccountDetails.objects.get(pk=account_pk, profile__user__pk=employee_pk)
+        from company.utils import get_company_users
+        
+        # Verify employee belongs to same company
+        company_users = get_company_users(self.request.user)
+        
+        try:
+            account_detail = AccountDetails.objects.select_related('profile__user').get(
+                pk=account_pk, 
+                profile__user__pk=employee_pk
+            )
+            
+            if account_detail.profile.user not in company_users:
+                raise AccountDetails.DoesNotExist
+                
+            return account_detail
+        except AccountDetails.DoesNotExist:
+            raise AccountDetails.DoesNotExist
 
     def get(self, request, employee_pk, account_pk):
         try:
@@ -557,11 +698,15 @@ class WarningListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_employee_company
         
         queryset = Warning.objects.select_related(
             'warning_to__profile', 
             'warning_by__profile'
         ).all().order_by('-warning_date', '-id')
+        
+        # Filter by company through warning_to (employee)
+        queryset = filter_by_employee_company(queryset, request.user, 'warning_to')
         
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -573,13 +718,13 @@ class WarningListCreateView(APIView):
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = WarningSerializer(page, many=True)
+        serializer = WarningSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
     
     
     def post(self, request):
-        serializer = WarningSerializer(data=request.data)
+        serializer = WarningSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -593,19 +738,27 @@ class WarningDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_employee_company
+        
         try:
-            return Warning.objects.get(pk=pk)
+            queryset = Warning.objects.filter(pk=pk)
+            queryset = filter_by_employee_company(queryset, self.request.user, 'warning_to')
+            warning = queryset.first()
+            
+            if not warning:
+                raise Http404
+            return warning
         except Warning.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         warning = self.get_object(pk)
-        serializer = WarningSerializer(warning)
+        serializer = WarningSerializer(warning, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         warning = self.get_object(pk)
-        serializer = WarningSerializer(warning, data=request.data)
+        serializer = WarningSerializer(warning, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -623,11 +776,15 @@ class TerminationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_employee_company
         
         queryset = Termination.objects.select_related(
             'terminate_to__profile', 
             'terminate_by__profile'
         ).all().order_by('-termination_date', '-id')
+        
+        # Filter by company through terminate_to (employee)
+        queryset = filter_by_employee_company(queryset, request.user, 'terminate_to')
         
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -639,12 +796,12 @@ class TerminationListCreateView(APIView):
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = TerminationSerializer(page, many=True)
+        serializer = TerminationSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = TerminationSerializer(data=request.data)
+        serializer = TerminationSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -658,19 +815,27 @@ class TerminationDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_employee_company
+        
         try:
-            return Termination.objects.get(pk=pk)
+            queryset = Termination.objects.filter(pk=pk)
+            queryset = filter_by_employee_company(queryset, self.request.user, 'terminate_to')
+            termination = queryset.first()
+            
+            if not termination:
+                raise Http404
+            return termination
         except Termination.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         termination = self.get_object(pk)
-        serializer = TerminationSerializer(termination)
+        serializer = TerminationSerializer(termination, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         termination = self.get_object(pk)
-        serializer = TerminationSerializer(termination, data=request.data)
+        serializer = TerminationSerializer(termination, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -688,14 +853,17 @@ class PromotionListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-
+        from company.utils import filter_by_employee_company
+        
         queryset = Promotion.objects.select_related(
             'employee__profile', 
             'promoted_department',
             'promoted_designation'
         ).all().order_by('-promotion_date', '-id')
         
-
+        # Filter by company through employee
+        queryset = filter_by_employee_company(queryset, request.user, 'employee')
+        
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
@@ -703,11 +871,11 @@ class PromotionListCreateView(APIView):
             )
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = PromotionSerializer(page, many=True)
+        serializer = PromotionSerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = PromotionSerializer(data=request.data)
+        serializer = PromotionSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -721,19 +889,27 @@ class PromotionDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_employee_company
+        
         try:
-            return Promotion.objects.get(pk=pk)
+            queryset = Promotion.objects.filter(pk=pk)
+            queryset = filter_by_employee_company(queryset, self.request.user, 'employee')
+            promotion = queryset.first()
+            
+            if not promotion:
+                raise Http404
+            return promotion
         except Promotion.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         promotion = self.get_object(pk)
-        serializer = PromotionSerializer(promotion)
+        serializer = PromotionSerializer(promotion, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         promotion = self.get_object(pk)
-        serializer = PromotionSerializer(promotion, data=request.data)
+        serializer = PromotionSerializer(promotion, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -751,11 +927,16 @@ class EmployeeJobStatusUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, pk):
+        from company.utils import get_company_users
+        
+        # ✅ MULTI-TENANCY: Filter by company
+        company_users = get_company_users(request.user)
+        
         try:
             # Find the profile of the employee using their user ID (pk)
-            profile = Profile.objects.get(user__pk=pk)
+            profile = Profile.objects.get(user__pk=pk, user__in=company_users)
         except Profile.DoesNotExist:
-            return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "Employee not found or does not belong to your company."}, status=status.HTTP_404_NOT_FOUND)
         
         # Use the serializer to validate and update the data
         serializer = EmployeeJobStatusSerializer(profile, data=request.data, partial=True)
@@ -774,7 +955,13 @@ class HolidayListCreateView(APIView):
 
     def get(self, request):
         """ List all holidays with search and pagination. """
+        from company.utils import filter_by_company
+        
         queryset = Holiday.objects.all().order_by('name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+        
         search_query = request.query_params.get('search', None)
         
         if search_query:
@@ -783,11 +970,11 @@ class HolidayListCreateView(APIView):
             )
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = HolidaySerializer(page, many=True)
+        serializer = HolidaySerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = HolidaySerializer(data=request.data)
+        serializer = HolidaySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -800,27 +987,35 @@ class HolidayDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return Holiday.objects.get(pk=pk)
+            holidays = Holiday.objects.filter(pk=pk)
+            holidays = filter_by_company(holidays, self.request.user)
+            holiday = holidays.first()
+            
+            if not holiday:
+                raise Http404
+            return holiday
         except Holiday.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
-        item = self.get_object(pk)
-        serializer = HolidaySerializer(item)
+        holiday = self.get_object(pk)
+        serializer = HolidaySerializer(holiday, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
-        item = self.get_object(pk)
-        serializer = HolidaySerializer(item, data=request.data)
+        holiday = self.get_object(pk)
+        serializer = HolidaySerializer(holiday, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        item = self.get_object(pk)
-        item.delete()
+        holiday = self.get_object(pk)
+        holiday.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -833,20 +1028,32 @@ class PublicHolidayListCreateView(APIView):
 
     def get(self, request):
         """ List all public holidays with search and pagination (Only by Holiday Name). """
+        from company.utils import get_company_owner
         
-        queryset = PublicHoliday.objects.select_related('holiday').all().order_by('-start_date')
+        queryset = PublicHoliday.objects.select_related('holiday').all().order_by('start_date')  # Fixed: date -> start_date
+        
+        # Filter by company through holiday relationship
+        if request.user.is_superuser:
+            pass  # Superuser sees all
+        else:
+            company_owner = get_company_owner(request.user)
+            if company_owner:
+                queryset = queryset.filter(holiday__parent=company_owner)
+            else:
+                queryset = queryset.none()
+        
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
-                Q(holiday__name__icontains=search_query) 
+                Q(holiday__name__icontains=search_query)  # Fixed: name -> holiday__name
             )
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = PublicHolidaySerializer(page, many=True)
+        serializer = PublicHolidaySerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = PublicHolidaySerializer(data=request.data)
+        serializer = PublicHolidaySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -859,27 +1066,43 @@ class PublicHolidayDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import get_company_owner
+        
         try:
-            return PublicHoliday.objects.get(pk=pk)
+            company_owner = get_company_owner(self.request.user)
+            
+            if self.request.user.is_superuser:
+                holiday = PublicHoliday.objects.filter(pk=pk).first()
+            elif company_owner:
+                holiday = PublicHoliday.objects.filter(
+                    pk=pk,
+                    holiday__parent=company_owner
+                ).first()
+            else:
+                holiday = None
+            
+            if not holiday:
+                raise Http404
+            return holiday
         except PublicHoliday.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
-        item = self.get_object(pk)
-        serializer = PublicHolidaySerializer(item)
+        holiday = self.get_object(pk)
+        serializer = PublicHolidaySerializer(holiday, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
-        item = self.get_object(pk)
-        serializer = PublicHolidaySerializer(item, data=request.data)
+        holiday = self.get_object(pk)
+        serializer = PublicHolidaySerializer(holiday, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        item = self.get_object(pk)
-        item.delete()
+        holiday = self.get_object(pk)
+        holiday.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -891,8 +1114,12 @@ class WeeklyHolidayListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_company
         
         queryset = WeeklyHoliday.objects.all().order_by('day')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
         
         search_query = request.query_params.get('search', None)
         
@@ -904,12 +1131,12 @@ class WeeklyHolidayListCreateView(APIView):
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = WeeklyHolidaySerializer(page, many=True)
+        serializer = WeeklyHolidaySerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
     
     def post(self, request):
-        serializer = WeeklyHolidaySerializer(data=request.data)
+        serializer = WeeklyHolidaySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -922,27 +1149,35 @@ class WeeklyHolidayDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return WeeklyHoliday.objects.get(pk=pk)
+            holidays = WeeklyHoliday.objects.filter(pk=pk)
+            holidays = filter_by_company(holidays, self.request.user)
+            holiday = holidays.first()
+            
+            if not holiday:
+                raise Http404
+            return holiday
         except WeeklyHoliday.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
-        item = self.get_object(pk)
-        serializer = WeeklyHolidaySerializer(item)
+        holiday = self.get_object(pk)
+        serializer = WeeklyHolidaySerializer(holiday, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
-        item = self.get_object(pk)
-        serializer = WeeklyHolidaySerializer(item, data=request.data)
+        holiday = self.get_object(pk)
+        serializer = WeeklyHolidaySerializer(holiday, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk):
-        item = self.get_object(pk)
-        item.delete()
+        holiday = self.get_object(pk)
+        holiday.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -954,8 +1189,12 @@ class LeaveTypeListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-    
+        from company.utils import filter_by_company
+        
         queryset = LeaveType.objects.all().order_by('name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
         
         search_query = request.query_params.get('search', None)
         
@@ -967,12 +1206,12 @@ class LeaveTypeListCreateView(APIView):
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = LeaveTypeSerializer(page, many=True)
+        serializer = LeaveTypeSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request):
-        serializer = LeaveTypeSerializer(data=request.data)
+        serializer = LeaveTypeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             # 1. Save the new LeaveType object
             new_leave_type = serializer.save()
@@ -1006,19 +1245,27 @@ class LeaveTypeDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return LeaveType.objects.get(pk=pk)
+            leave_types = LeaveType.objects.filter(pk=pk)
+            leave_types = filter_by_company(leave_types, self.request.user)
+            leave_type = leave_types.first()
+            
+            if not leave_type:
+                raise Http404
+            return leave_type
         except LeaveType.DoesNotExist:
             raise Http404
 
     def get(self, request, pk):
         item = self.get_object(pk)
-        serializer = LeaveTypeSerializer(item)
+        serializer = LeaveTypeSerializer(item, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         item = self.get_object(pk)
-        serializer = LeaveTypeSerializer(item, data=request.data)
+        serializer = LeaveTypeSerializer(item, data=request.data, context={'request': request})
 
         if serializer.is_valid():
             serializer.save()  # now number_of_days update allowed
@@ -1034,20 +1281,45 @@ class LeaveTypeDetailView(APIView):
 
 class EarnLeaveRuleView(APIView):
     """
-    Admin can view or update the single Earn Leave Rule.
-    (Corresponds to "Earn Leave Configure")
+    Manage single Earn Leave Rule per company.
+    GET: Returns existing rule or creates with default (day_of_earn_leave=0)
+    PUT: Updates rule (only day_of_earn_leave is editable)
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # get_or_create ensures there's always one rule object to edit
-        rule, created = EarnLeaveRule.objects.get_or_create(id=1)
-        serializer = EarnLeaveRuleSerializer(rule)
+        from company.utils import get_company_owner
+        
+        company_owner = get_company_owner(request.user)
+        
+        # Get or create rule for this company
+        rule, created = EarnLeaveRule.objects.get_or_create(
+            parent=company_owner,
+            defaults={
+                'for_month': 1,  # Fixed
+                'day_of_earn_leave': 0,  # Default 0
+                'created_by': request.user
+            }
+        )
+        
+        serializer = EarnLeaveRuleSerializer(rule, context={'request': request})
         return Response(serializer.data)
-
+    
     def put(self, request):
-        rule, created = EarnLeaveRule.objects.get_or_create(id=1)
-        serializer = EarnLeaveRuleSerializer(rule, data=request.data)
+        """Update existing rule (only day_of_earn_leave is editable)"""
+        from company.utils import get_company_owner
+        
+        company_owner = get_company_owner(request.user)
+        
+        try:
+            rule = EarnLeaveRule.objects.get(parent=company_owner)
+        except EarnLeaveRule.DoesNotExist:
+            return Response(
+                {"error": "Earn leave rule not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = EarnLeaveRuleSerializer(rule, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -1107,14 +1379,14 @@ class MyLeaveApplicationsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        
+        # Employee's own leave applications (already filtered by employee=request.user)
         queryset = LeaveApplication.objects.filter(employee=request.user).order_by('-application_date')
         
         paginator = StandardResultsSetPagination()
         
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = LeaveApplicationListSerializer(page, many=True)
+        serializer = LeaveApplicationListSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
     
@@ -1126,14 +1398,18 @@ class AllLeaveApplicationsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        from company.utils import filter_by_employee_company
         
         queryset = LeaveApplication.objects.all().order_by('-application_date')
+        
+        # Filter by company through employee
+        queryset = filter_by_employee_company(queryset, request.user, 'employee')
         
         paginator = StandardResultsSetPagination()
         
         page = paginator.paginate_queryset(queryset, request, view=self)
         
-        serializer = LeaveApplicationListSerializer(page, many=True)
+        serializer = LeaveApplicationListSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
 
@@ -1146,8 +1422,16 @@ class LeaveApprovalView(APIView):
     permission_classes = [IsAuthenticated]
     
     def patch(self, request, pk):
+        from company.utils import filter_by_employee_company
+        
         try:
-            application = LeaveApplication.objects.get(pk=pk)
+            # ✅ MULTI-TENANCY: Verify leave application belongs to company
+            applications = LeaveApplication.objects.filter(pk=pk)
+            applications = filter_by_employee_company(applications, request.user, 'employee')
+            application = applications.first()
+            
+            if not application:
+                raise LeaveApplication.DoesNotExist
         except LeaveApplication.DoesNotExist:
             return Response({"error": f"Application ID {pk} not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1235,6 +1519,7 @@ class LeaveReportBaseView(APIView):
     
     def get_filtered_applications(self, request, employee_specific=False):
         """ Filters applications based on request query parameters. """
+        from company.utils import filter_by_employee_company
         
         serializer = LeaveReportSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
@@ -1260,6 +1545,9 @@ class LeaveReportBaseView(APIView):
         
         # Fetch applications
         applications = LeaveApplication.objects.filter(filters).order_by('employee__id', 'from_date')
+        
+        # Filter by company through employee relationship
+        applications = filter_by_employee_company(applications, request.user, 'employee')
         
         return applications
 
@@ -1296,6 +1584,8 @@ class LeaveSummaryReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import get_company_owner, get_company_users
+        
         # Admin can view summary for a specific employee
         employee_id = request.query_params.get('employee_id')
         if not employee_id:
@@ -1307,6 +1597,13 @@ class LeaveSummaryReportView(APIView):
             target_employee = User.objects.get(pk=employee_id)
         except User.DoesNotExist:
             return Response({"error": "Employee not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # ✅ MULTI-TENANCY: Verify employee belongs to same company
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            if not company_users.filter(id=target_employee.id).exists():
+                return Response({"error": "Employee not found in your company."}, 
+                                status=status.HTTP_403_FORBIDDEN)
 
         summary_records = LeaveBalance.objects.filter(employee_id=employee_id)
         
@@ -1335,26 +1632,27 @@ class WorkShiftListCreateAPIView(APIView):
     """
     permission_classes = [IsAuthenticated] 
 
-    def get(self, request, *args, **kwargs):
-        """ List all work shifts with search and pagination. """
-
-        queryset = WorkShift.objects.all().order_by('shift_name')
-
-        search_query = request.query_params.get('search', None)
+    def get(self, request):
+        from company.utils import filter_by_company
         
+        queryset = WorkShift.objects.all().order_by('shift_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+        
+        search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
                 Q(shift_name__icontains=search_query) 
             )
-
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = WorkShiftSerializer(page, many=True)
+        serializer = WorkShiftSerializer(page, many=True, context={'request': request})
         return paginator.get_paginated_response(serializer.data)
     
     def post(self, request, *args, **kwargs):
         """ Create a new work shift """
-        serializer = WorkShiftSerializer(data=request.data)
+        serializer = WorkShiftSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1367,16 +1665,30 @@ class WorkShiftDetailAPIView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
+    def get_object(self, pk):
+        from company.utils import filter_by_company
+        
+        try:
+            workshifts = WorkShift.objects.filter(pk=pk)
+            workshifts = filter_by_company(workshifts, self.request.user)
+            workshift = workshifts.first()
+            
+            if not workshift:
+                raise Http404
+            return workshift
+        except WorkShift.DoesNotExist:
+            raise Http404
+
     def get(self, request, pk, *args, **kwargs):
         """ Retrieve a specific shift """
-        shift = get_object_or_404(WorkShift, pk=pk)
+        shift = self.get_object(pk)
         serializer = WorkShiftSerializer(shift)
         return Response(serializer.data)
 
     def put(self, request, pk, *args, **kwargs):
         """ Update a specific shift (Full update) """
-        shift = get_object_or_404(WorkShift, pk=pk)
-        serializer = WorkShiftSerializer(shift, data=request.data)
+        shift = self.get_object(pk)
+        serializer = WorkShiftSerializer(shift, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -1384,7 +1696,7 @@ class WorkShiftDetailAPIView(APIView):
 
     def delete(self, request, pk, *args, **kwargs):
         """ Delete a specific shift """
-        shift = get_object_or_404(WorkShift, pk=pk)
+        shift = self.get_object(pk)
         shift.delete()
         return Response({"message": "Work Shift deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
     
@@ -1502,6 +1814,8 @@ class MonthlyAttendanceReportView(APIView):
         local_tz = timezone.get_current_timezone() 
         
         # 1. Fetch the specific employee profile
+        from company.utils import get_company_users
+        
         try:
             employee = User.objects.get(pk=employee_id) if employee_id else None
             employee_profile = Profile.objects.select_related('work_shift').get(user=employee) if employee else None
@@ -1512,7 +1826,13 @@ class MonthlyAttendanceReportView(APIView):
             # Admin view requires filtering by employee ID to show a summary/detailed table
             return Response({"error": "Employee ID is required for detailed monthly report."}, 
                             status=status.HTTP_400_BAD_REQUEST)
-
+        
+        # ✅ MULTI-TENANCY: Verify employee belongs to same company
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            if not company_users.filter(id=employee.id).exists():
+                return Response({"error": "Employee not found in your company."}, 
+                                status=status.HTTP_403_FORBIDDEN)
 
         # 2. Get ALL Attendance records for the employee within the date range
         all_attendance_qs = Attendance.objects.filter(
@@ -1596,6 +1916,7 @@ class ManualAttendanceView(APIView):
 
     def get(self, request):
         """ Filters and lists employees by Department and Date for manual entry. """
+        from company.utils import filter_by_company, get_company_users
         
         filter_serializer = ManualAttendanceFilterSerializer(data=request.query_params)
         filter_serializer.is_valid(raise_exception=True)
@@ -1604,9 +1925,18 @@ class ManualAttendanceView(APIView):
         dept_id = data['department_id']
         target_date = data['target_date']
         
+        # ✅ MULTI-TENANCY: Verify department belongs to company
+        departments = Department.objects.filter(pk=dept_id)
+        departments = filter_by_company(departments, request.user)
+        if not departments.exists():
+            return Response({"error": "Department not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get company users only
+        company_users = get_company_users(request.user)
+        
         employees_in_dept = Profile.objects.filter(
             department_id=dept_id, 
-            user__is_superuser=False, 
+            user__in=company_users,  # ✅ Only company users (includes owner)
             user__is_active=True
         ).select_related('user', 'user__role', 'work_shift').order_by('employee_id')
         
@@ -1656,6 +1986,7 @@ class ManualAttendanceView(APIView):
 
     def patch(self, request):
         """ Manually updates a specific employee's attendance record and recalculates fields. """
+        from company.utils import get_company_users
         
         serializer = ManualAttendanceInputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1669,6 +2000,13 @@ class ManualAttendanceView(APIView):
             employee_profile = Profile.objects.select_related('work_shift').get(user=employee)
         except (User.DoesNotExist, Profile.DoesNotExist):
             return Response({"error": f"Employee {employee_id} not found."}, status=status.HTTP_404_NOT_FOUND)
+        
+        # ✅ MULTI-TENANCY: Verify employee belongs to same company
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            if not company_users.filter(id=employee.id).exists():
+                return Response({"error": "You cannot modify attendance for employees from other companies."}, 
+                                status=status.HTTP_403_FORBIDDEN)
 
         attendance_record, created = Attendance.objects.get_or_create(
             employee=employee,
@@ -1740,14 +2078,20 @@ class AttendanceReportBaseView(APIView):
     permission_classes = [IsAuthenticated] 
     
     def get_filtered_attendance(self, request, employee_specific=False):
-        # ... (unchanged logic) ...
+        from company.utils import get_company_users
+        
         filter_serializer = AttendanceReportFilterSerializer(data=request.query_params)
         filter_serializer.is_valid(raise_exception=True)
         data = filter_serializer.validated_data
         
         filters = Q()
-        #base_filters &= Q(employee__role=User.Role.EMPLOYEE)
         filters &= Q(employee__profile__isnull=False)
+        
+        # ✅ MULTI-TENANCY: Filter by company users first
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            filters &= Q(employee__in=company_users)
+        
         if employee_specific:
             filters &= Q(employee=request.user)
         elif data.get('employee_id'):
@@ -1768,6 +2112,8 @@ class DailyAttendanceReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import get_company_users
+        
         serializer = DailyAttendanceFilterSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         target_date = serializer.validated_data['target_date']
@@ -1775,11 +2121,22 @@ class DailyAttendanceReportView(APIView):
         # 1. CRITICAL: Get the local timezone reference (Asia/Kolkata)
         local_tz = timezone.get_current_timezone() 
         
-        records = Attendance.objects.filter(attendance_date=target_date).select_related(
-            'employee__profile', 
-            'employee__profile__designation'
-        ).order_by('employee__profile__department__name', 'employee__profile__employee_id')
-        
+        # 2. Filter by company users
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            records = Attendance.objects.filter(
+                attendance_date=target_date,
+                employee__in=company_users
+            ).select_related(
+                'employee__profile', 
+                'employee__profile__designation'
+            ).order_by('employee__profile__department__name', 'employee__profile__employee_id')
+        else:
+            records = Attendance.objects.filter(attendance_date=target_date).select_related(
+                'employee__profile', 
+                'employee__profile__designation'
+            ).order_by('employee__profile__department__name', 'employee__profile__employee_id')
+
         output_data = []
         for record in records:
             profile = record.employee.profile
@@ -1809,6 +2166,8 @@ class AttendanceSummaryReportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import get_company_users
+        
         serializer = MonthlySummaryFilterSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         month_str = serializer.validated_data['month'] 
@@ -1828,6 +2187,11 @@ class AttendanceSummaryReportView(APIView):
         
         
         base_filters &= Q(employee__profile__isnull=False) 
+        
+        # ✅ MULTI-TENANCY: Filter by company users
+        if not request.user.is_superuser:
+            company_users = get_company_users(request.user)
+            base_filters &= Q(employee__in=company_users)
         
         records = Attendance.objects.filter(base_filters).select_related(
             'employee__profile', 
@@ -1886,7 +2250,13 @@ class AllowanceListCreateView(APIView):
 
     def get(self, request, format=None):
         """ List all Allowance instances with search and pagination. """
+        from company.utils import filter_by_company
+        
         queryset = Allowance.objects.all().order_by('allowance_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         search_query = request.query_params.get('search', None)
         
         if search_query:
@@ -1901,7 +2271,7 @@ class AllowanceListCreateView(APIView):
 
     def post(self, request, format=None):
         """ Create a new Allowance instance. """
-        serializer = AllowanceSerializer(data=request.data)
+        serializer = AllowanceSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1916,8 +2286,18 @@ class AllowanceDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        """ Helper method to get the Allowance object or raise 404. """
-        return get_object_or_404(Allowance, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            allowances = Allowance.objects.filter(pk=pk)
+            allowances = filter_by_company(allowances, self.request.user)
+            allowance = allowances.first()
+            
+            if not allowance:
+                raise Http404
+            return allowance
+        except Allowance.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """ Retrieve a single Allowance instance. """
@@ -1928,7 +2308,7 @@ class AllowanceDetailView(APIView):
     def put(self, request, pk, format=None):
         """ Fully update an Allowance instance. """
         allowance = self.get_object(pk)
-        serializer = AllowanceSerializer(allowance, data=request.data)
+        serializer = AllowanceSerializer(allowance, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -1937,7 +2317,7 @@ class AllowanceDetailView(APIView):
     def patch(self, request, pk, format=None):
         """ Partially update an Allowance instance. """
         allowance = self.get_object(pk)
-        serializer = AllowanceSerializer(allowance, data=request.data, partial=True)
+        serializer = AllowanceSerializer(allowance, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -1961,7 +2341,12 @@ class DeductionListCreateView(APIView):
 
     def get(self, request, format=None):
         """ List all Deduction instances with search and pagination. """
+        from company.utils import filter_by_company
+        
         queryset = Deduction.objects.all().order_by('deduction_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
 
         search_query = request.query_params.get('search', None)
         
@@ -1977,7 +2362,7 @@ class DeductionListCreateView(APIView):
 
     def post(self, request, format=None):
         """ Create a new Deduction instance. """
-        serializer = DeductionSerializer(data=request.data)
+        serializer = DeductionSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1992,8 +2377,18 @@ class DeductionDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        """ Helper method to get the Deduction object or raise 404. """
-        return get_object_or_404(Deduction, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            deductions = Deduction.objects.filter(pk=pk)
+            deductions = filter_by_company(deductions, self.request.user)
+            deduction = deductions.first()
+            
+            if not deduction:
+                raise Http404
+            return deduction
+        except Deduction.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """ Retrieve a single Deduction instance. """
@@ -2004,7 +2399,7 @@ class DeductionDetailView(APIView):
     def put(self, request, pk, format=None):
         """ Fully update a Deduction instance. """
         deduction = self.get_object(pk)
-        serializer = DeductionSerializer(deduction, data=request.data)
+        serializer = DeductionSerializer(deduction, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2013,14 +2408,14 @@ class DeductionDetailView(APIView):
     def patch(self, request, pk, format=None):
         """ Partially update a Deduction instance. """
         deduction = self.get_object(pk)
-        serializer = DeductionSerializer(deduction, data=request.data, partial=True)
+        serializer = DeductionSerializer(deduction, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, pk, format=None):
-        """ Delete a Deduction instance. """
+        """ Delete an Deduction instance. """
         deduction = self.get_object(pk)
         deduction.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -2035,7 +2430,12 @@ class MonthlyPayGradeListCreateView(APIView):
 
     def get(self, request, format=None):
         """ List all Monthly Pay Grade instances with search and pagination. """
+        from company.utils import filter_by_company
+        
         queryset = MonthlyPayGrade.objects.all().order_by('grade_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
 
         search_query = request.query_params.get('search', None)
         
@@ -2050,7 +2450,7 @@ class MonthlyPayGradeListCreateView(APIView):
         return paginator.get_paginated_response(serializer.data)
 
     def post(self, request, format=None):
-        serializer = MonthlyPayGradeSerializer(data=request.data)
+        serializer = MonthlyPayGradeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() # Serializer.save() will handle all nested logic and calculation
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2066,7 +2466,18 @@ class MonthlyPayGradeDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        return get_object_or_404(MonthlyPayGrade, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            pay_grades = MonthlyPayGrade.objects.filter(pk=pk)
+            pay_grades = filter_by_company(pay_grades, self.request.user)
+            pay_grade = pay_grades.first()
+            
+            if not pay_grade:
+                raise Http404
+            return pay_grade
+        except MonthlyPayGrade.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         pay_grade = self.get_object(pk)
@@ -2076,7 +2487,7 @@ class MonthlyPayGradeDetailView(APIView):
     def put(self, request, pk, format=None):
         pay_grade = self.get_object(pk)
         # Full update (partial=False)
-        serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data)
+        serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data)
@@ -2085,7 +2496,7 @@ class MonthlyPayGradeDetailView(APIView):
     def patch(self, request, pk, format=None):
         pay_grade = self.get_object(pk)
         # Partial update (partial=True)
-        serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data, partial=True)
+        serializer = MonthlyPayGradeSerializer(pay_grade, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data)
@@ -2105,7 +2516,13 @@ class HourlyPayGradeListCreateView(APIView):
 
     def get(self, request, format=None):
         """ List all Hourly Pay Grade instances with search and pagination. """
+        from company.utils import filter_by_company
+        
         queryset = HourlyPayGrade.objects.all().order_by('pay_grade_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         search_query = request.query_params.get('search', None)
         
         if search_query:
@@ -2119,7 +2536,7 @@ class HourlyPayGradeListCreateView(APIView):
 
     def post(self, request, format=None):
         """Create a new hourly pay grade."""
-        serializer = HourlyPayGradeSerializer(data=request.data)
+        serializer = HourlyPayGradeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2135,7 +2552,18 @@ class HourlyPayGradeDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        return get_object_or_404(HourlyPayGrade, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            pay_grades = HourlyPayGrade.objects.filter(pk=pk)
+            pay_grades = filter_by_company(pay_grades, self.request.user)
+            pay_grade = pay_grades.first()
+            
+            if not pay_grade:
+                raise Http404
+            return pay_grade
+        except HourlyPayGrade.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a specific hourly pay grade."""
@@ -2146,7 +2574,7 @@ class HourlyPayGradeDetailView(APIView):
     def put(self, request, pk, format=None):
         """Update an hourly pay grade (full update)."""
         pay_grade = self.get_object(pk)
-        serializer = HourlyPayGradeSerializer(pay_grade, data=request.data)
+        serializer = HourlyPayGradeSerializer(pay_grade, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2155,7 +2583,7 @@ class HourlyPayGradeDetailView(APIView):
     def patch(self, request, pk, format=None):
         """Update an hourly pay grade (partial update)."""
         pay_grade = self.get_object(pk)
-        serializer = HourlyPayGradeSerializer(pay_grade, data=request.data, partial=True)
+        serializer = HourlyPayGradeSerializer(pay_grade, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2176,7 +2604,13 @@ class PerformanceCategoryListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all active and inactive performance categories with search and pagination."""
+        from company.utils import filter_by_company
+        
         queryset = PerformanceCategory.objects.all().order_by('category_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(category_name__icontains=search_query)
@@ -2188,7 +2622,7 @@ class PerformanceCategoryListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new performance category."""
-        serializer = PerformanceCategorySerializer(data=request.data)
+        serializer = PerformanceCategorySerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2201,8 +2635,18 @@ class PerformanceCategoryDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        """Helper to safely fetch a category instance."""
-        return get_object_or_404(PerformanceCategory, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            categories = PerformanceCategory.objects.filter(pk=pk)
+            categories = filter_by_company(categories, self.request.user)
+            category = categories.first()
+            
+            if not category:
+                raise Http404
+            return category
+        except PerformanceCategory.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single performance category."""
@@ -2213,7 +2657,7 @@ class PerformanceCategoryDetailAPIView(APIView):
     def put(self, request, pk, format=None):
         """Update a performance category (full update)."""
         category = self.get_object(pk)
-        serializer = PerformanceCategorySerializer(category, data=request.data)
+        serializer = PerformanceCategorySerializer(category, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2232,7 +2676,18 @@ class PerformanceCriteriaListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all performance criteria with search and pagination."""
+        from company.utils import get_company_owner
+        
         queryset = PerformanceCriteria.objects.select_related('category').all().order_by('category__category_name', 'criteria_name')
+        
+        # Filter by company through category's parent
+        if not request.user.is_superuser:
+            company_owner = get_company_owner(request.user)
+            if company_owner:
+                queryset = queryset.filter(category__parent=company_owner)
+            else:
+                queryset = queryset.none()
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
@@ -2246,7 +2701,7 @@ class PerformanceCriteriaListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new performance criterion."""
-        serializer = PerformanceCriteriaSerializer(data=request.data)
+        serializer = PerformanceCriteriaSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2259,8 +2714,26 @@ class PerformanceCriteriaDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        """Helper to safely fetch a criteria instance."""
-        return get_object_or_404(PerformanceCriteria, pk=pk)
+        from company.utils import get_company_owner
+        
+        try:
+            criterias = PerformanceCriteria.objects.filter(pk=pk)
+            
+            # Filter by company through category's parent
+            if not self.request.user.is_superuser:
+                company_owner = get_company_owner(self.request.user)
+                if company_owner:
+                    criterias = criterias.filter(category__parent=company_owner)
+                else:
+                    criterias = criterias.none()
+            
+            criteria = criterias.first()
+            
+            if not criteria:
+                raise Http404
+            return criteria
+        except PerformanceCriteria.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single performance criterion."""
@@ -2271,7 +2744,7 @@ class PerformanceCriteriaDetailAPIView(APIView):
     def put(self, request, pk, format=None):
         """Update a performance criterion (full update)."""
         criteria = self.get_object(pk)
-        serializer = PerformanceCriteriaSerializer(criteria, data=request.data)
+        serializer = PerformanceCriteriaSerializer(criteria, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2292,12 +2765,19 @@ class EmployeePerformanceListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all performance reviews with search and pagination."""
+        from company.utils import filter_by_employee_company
+        
         queryset = EmployeePerformance.objects.select_related('employee', 'reviewed_by').prefetch_related('ratings').all().order_by('-review_month')
+        
+        # Filter by company through employee relationship
+        queryset = filter_by_employee_company(queryset, request.user, employee_field='employee')
+
         search_query = request.query_params.get('search', None)
         
         if search_query:
             queryset = queryset.filter(
-                Q(employee__full_name__icontains=search_query) 
+                Q(employee__profile__first_name__icontains=search_query) |
+                Q(employee__profile__last_name__icontains=search_query)
             )
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -2319,9 +2799,19 @@ class EmployeePerformanceDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        """Helper to safely fetch a review instance."""
-        # Prefetch relations for the detail view efficiency
-        return get_object_or_404(EmployeePerformance.objects.select_related('employee', 'reviewed_by').prefetch_related('ratings'), pk=pk)
+        from company.utils import filter_by_employee_company
+        
+        try:
+            # Prefetch relations for the detail view efficiency
+            reviews = EmployeePerformance.objects.select_related('employee', 'reviewed_by').prefetch_related('ratings').filter(pk=pk)
+            reviews = filter_by_employee_company(reviews, self.request.user, employee_field='employee')
+            review = reviews.first()
+            
+            if not review:
+                raise Http404
+            return review
+        except EmployeePerformance.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single performance review."""
@@ -2353,10 +2843,17 @@ class PerformanceSummaryReportAPIView(APIView):
     permission_classes = [IsAuthenticated] 
     
     def get(self, request, format=None):
+        from company.utils import filter_by_employee_company
+        
         employee_id = request.query_params.get('employee_id')
         from_date = request.query_params.get('from_date')
         to_date = request.query_params.get('to_date')
+        
         queryset = EmployeePerformance.objects.select_related('employee').all()
+        
+        # Filter by company through employee relationship
+        queryset = filter_by_employee_company(queryset, request.user, employee_field='employee')
+
         if employee_id:
             try:
                 queryset = queryset.filter(employee__id=int(employee_id)) 
@@ -2389,7 +2886,13 @@ class JobPostListCreateAPIView(APIView):
     
     def get(self, request, format=None):
         """List all job posts with search and pagination."""
+        from company.utils import filter_by_company
+        
         queryset = JobPost.objects.select_related('published_by').all().order_by('-created_at')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
@@ -2405,7 +2908,7 @@ class JobPostListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new job post (jp02.png)."""
-        serializer = JobPostSerializer(data=request.data)
+        serializer = JobPostSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             # Save karte waqt 'published_by' field ko current logged-in user se set karna
             serializer.save(published_by=request.user) 
@@ -2420,9 +2923,20 @@ class JobPostDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
-        """Helper to safely fetch a JobPost instance."""
-        # Queryset mein 'published_by' relationship ko pehle hi fetch kar lo
-        return get_object_or_404(JobPost.objects.select_related('published_by'), pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            # Helper to safely fetch a JobPost instance.
+            # Queryset mein 'published_by' relationship ko pehle hi fetch kar lo
+            job_posts = JobPost.objects.select_related('published_by').filter(pk=pk)
+            job_posts = filter_by_company(job_posts, self.request.user)
+            job_post = job_posts.first()
+            
+            if not job_post:
+                raise Http404
+            return job_post
+        except JobPost.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single job post."""
@@ -2458,8 +2972,13 @@ class TrainingTypeListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all training types with search and pagination."""
+        from company.utils import filter_by_company
         
         queryset = TrainingType.objects.all().order_by('training_type_name')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(training_type_name__icontains=search_query)
@@ -2470,7 +2989,7 @@ class TrainingTypeListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new training type """
-        serializer = TrainingTypeSerializer(data=request.data)
+        serializer = TrainingTypeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2484,8 +3003,19 @@ class TrainingTypeDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
-        """Helper to safely fetch a TrainingType instance."""
-        return get_object_or_404(TrainingType, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            # Helper to safely fetch a TrainingType instance.
+            training_types = TrainingType.objects.filter(pk=pk)
+            training_types = filter_by_company(training_types, self.request.user)
+            training_type = training_types.first()
+            
+            if not training_type:
+                raise Http404
+            return training_type
+        except TrainingType.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single training type."""
@@ -2519,13 +3049,20 @@ class EmployeeTrainingListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all employee training records with search and pagination."""
+        from company.utils import filter_by_employee_company
+        
         queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
+        
+        # Filter by company through employee relationship
+        queryset = filter_by_employee_company(queryset, request.user, employee_field='employee')
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
-                Q(employee__full_name__icontains=search_query) |            # 1. Employee Name par search
-                Q(training_type__training_type_name__icontains=search_query) | # 2. Training Type Name par search
-                Q(subject__icontains=search_query)                           # 3. Subject par search
+                Q(employee__profile__first_name__icontains=search_query) |      # 1. Employee First Name par search
+                Q(employee__profile__last_name__icontains=search_query) |       # 2. Employee Last Name par search
+                Q(training_type__training_type_name__icontains=search_query) | # 3. Training Type Name par search
+                Q(subject__icontains=search_query)                           # 4. Subject par search
             )
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
@@ -2534,7 +3071,7 @@ class EmployeeTrainingListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new employee training record."""
-        serializer = EmployeeTrainingSerializer(data=request.data)
+        serializer = EmployeeTrainingSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2548,9 +3085,20 @@ class EmployeeTrainingDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
-        """Helper to safely fetch an EmployeeTraining instance."""
-        # Queryset mein 'employee' aur 'training_type' relationships ko pehle hi fetch karein.
-        return get_object_or_404(EmployeeTraining.objects.select_related('employee', 'training_type'), pk=pk)
+        from company.utils import filter_by_employee_company
+        
+        try:
+            # Helper to safely fetch an EmployeeTraining instance.
+            # Queryset mein 'employee' aur 'training_type' relationships ko pehle hi fetch karein.
+            trainings = EmployeeTraining.objects.select_related('employee', 'training_type').filter(pk=pk)
+            trainings = filter_by_employee_company(trainings, self.request.user, employee_field='employee')
+            training = trainings.first()
+            
+            if not training:
+                raise Http404
+            return training
+        except EmployeeTraining.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single training record."""
@@ -2582,12 +3130,19 @@ class EmployeeTrainingReportAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, format=None):
-        employee_profile_id = request.query_params.get('employee_id', None)
+        from company.utils import filter_by_employee_company
+        
+        employee_id = request.query_params.get('employee_id', None)
+        
         queryset = EmployeeTraining.objects.select_related('employee', 'training_type').all().order_by('-from_date')
-        if employee_profile_id:
+        
+        # Filter by company through employee relationship
+        queryset = filter_by_employee_company(queryset, request.user, employee_field='employee')
+
+        if employee_id:
             try:
-                employee_profile_id = int(employee_profile_id) 
-                queryset = queryset.filter(employee__pk=employee_profile_id)
+                employee_id = int(employee_id) 
+                queryset = queryset.filter(employee__pk=employee_id)
             except ValueError:
                 return Response({"detail": "Invalid employee ID format."}, status=status.HTTP_400_BAD_REQUEST)
         paginator = StandardResultsSetPagination()
@@ -2602,13 +3157,20 @@ class AwardListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all employee awards with search and pagination."""
+        from company.utils import filter_by_employee_company
+        
         queryset = Award.objects.select_related('employee').all().order_by('-award_month')
+        
+        # Filter by company through employee relationship
+        queryset = filter_by_employee_company(queryset, request.user, employee_field='employee')
+
         search_query = request.query_params.get('search', None)
         if search_query:
             queryset = queryset.filter(
-                Q(employee__full_name__icontains=search_query) |  # Employee ka pura naam
-                Q(award_name__icontains=search_query) |            # Award Enum value (internal value)
-                Q(gift_item__icontains=search_query)              # Gift item par search
+                Q(employee__profile__first_name__icontains=search_query) |  # Employee first name
+                Q(employee__profile__last_name__icontains=search_query) |   # Employee last name
+                Q(award_name__icontains=search_query) |            # Award Enum value
+                Q(gift_item__icontains=search_query)              # Gift item
             )
 
         paginator = StandardResultsSetPagination()
@@ -2618,7 +3180,7 @@ class AwardListCreateAPIView(APIView):
 
     def post(self, request, format=None):
         """Create a new employee award (award02.png)."""
-        serializer = AwardSerializer(data=request.data)
+        serializer = AwardSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2629,9 +3191,20 @@ class AwardDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
-        """Helper to safely fetch an Award instance."""
-        # Optimize query by selecting related FKs
-        return get_object_or_404(Award.objects.select_related('employee'), pk=pk)
+        from company.utils import filter_by_employee_company
+        
+        try:
+            # Helper to safely fetch an Award instance.
+            # Optimize query by selecting related FKs
+            awards = Award.objects.select_related('employee').filter(pk=pk)
+            awards = filter_by_employee_company(awards, self.request.user, employee_field='employee')
+            award = awards.first()
+            
+            if not award:
+                raise Http404
+            return award
+        except Award.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single award record."""
@@ -2663,8 +3236,12 @@ class NoticeListCreateAPIView(APIView):
 
     def get(self, request, format=None):
         """List all notices with search and pagination."""
-
+        from company.utils import filter_by_company
+        
         queryset = Notice.objects.all().order_by('-publish_date')
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
 
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -2679,7 +3256,7 @@ class NoticeListCreateAPIView(APIView):
     def post(self, request, format=None):
         """Create a new notice."""
         # Use request.data for standard fields and files
-        serializer = NoticeSerializer(data=request.data)
+        serializer = NoticeSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save() 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2693,8 +3270,19 @@ class NoticeDetailAPIView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
-        """Helper to safely fetch a Notice instance."""
-        return get_object_or_404(Notice, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            # Helper to safely fetch a Notice instance.
+            notices = Notice.objects.filter(pk=pk)
+            notices = filter_by_company(notices, self.request.user)
+            notice = notices.first()
+            
+            if not notice:
+                raise Http404
+            return notice
+        except Notice.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk, format=None):
         """Retrieve a single notice record."""
@@ -2727,40 +3315,40 @@ class DashboardDataAPIView(APIView):
     permission_classes = [IsAuthenticated] 
 
     def get(self, request, *args, **kwargs):
+        from company.utils import get_company_users, filter_by_company
+        
         today = date.today()
         
-        # 1. Total Active Employees Count (Excluding only Superuser accounts)
+        # ✅ MULTI-TENANCY: Get company users
+        company_users = get_company_users(request.user)
         
-        # Define the base filter for counting all relevant staff:
+        # 1. Total Active Employees Count (Company-specific)
         staff_base_filter = Q(is_superuser=False) & Q(is_active=True)
         
-        # Count all active staff who are NOT superusers and have a linked profile
-        total_employees = User.objects.filter(
+        total_employees = company_users.filter(
             staff_base_filter,             
             profile__status='Active',            
             profile__isnull=False                
         ).count()
         
-        # Total Active Departments Count (No change needed)
-        total_departments = Department.objects.count()
+        # 2. Total Active Departments Count (Company-specific)
+        departments = Department.objects.all()
+        departments = filter_by_company(departments, request.user)
+        total_departments = departments.count()
         
-        # 2. Today's Attendance Record Filtering
-        
-        # Filter attendance records to match the users counted in 'total_employees'
+        # 3. Today's Attendance (Company-specific)
         today_attendance_records = Attendance.objects.filter(
             attendance_date=today,
-            employee__in=User.objects.filter(staff_base_filter).values_list('pk', flat=True)
-        ).filter(employee__profile__status='Active') # Only check attendance for active employees
+            employee__in=company_users.filter(staff_base_filter).values_list('pk', flat=True)
+        ).filter(employee__profile__status='Active')
         
         # Present Count
         present_count = today_attendance_records.filter(is_present=True).count()
         
-        # Absent Count (Total Active Employees - Present Employees)
+        # Absent Count
         absent_count = total_employees - present_count
         
-        
-        # --- 3. Today Attendance List (Only Present Employees' Summary) ---
-        
+        # --- 4. Today Attendance List (Only Present Employees) ---
         attendance_list = []
         today_present_records = today_attendance_records.filter(is_present=True).select_related('employee__profile')
 
@@ -2778,8 +3366,10 @@ class DashboardDataAPIView(APIView):
                 "late_duration": format_duration(record.late_duration), 
             })
             
-        # 4. Notice Board Data
-        latest_notice = Notice.objects.filter(status='PUBLISHED').order_by('-publish_date').first()
+        # --- 5. Latest Notice (Company-specific) ---
+        notices = Notice.objects.filter(status='PUBLISHED')
+        notices = filter_by_company(notices, request.user)
+        latest_notice = notices.order_by('-publish_date').first()
         
         notice_data = None
         if latest_notice:
@@ -2809,13 +3399,19 @@ class LateDeductionRuleListCreateAPIView(APIView):
 
     def get(self, request):
         """ Lists all Late Deduction Rules (List Action). """
+        from company.utils import filter_by_company
+        
         queryset = LateDeductionRule.objects.all().order_by('late_days_threshold')
-        serializer = LateDeductionRuleSerializer(queryset, many=True)
+        
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
+        serializer = LateDeductionRuleSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
     def post(self, request):
         """ Creates a new Late Deduction Rule (Create Action). """
-        serializer = LateDeductionRuleSerializer(data=request.data)
+        serializer = LateDeductionRuleSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -2826,18 +3422,29 @@ class LateDeductionRuleRetrieveUpdateDestroyAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get_object(self, pk):
-        return get_object_or_404(LateDeductionRule, pk=pk)
+        from company.utils import filter_by_company
+        
+        try:
+            rules = LateDeductionRule.objects.filter(pk=pk)
+            rules = filter_by_company(rules, self.request.user)
+            rule = rules.first()
+            
+            if not rule:
+                raise Http404
+            return rule
+        except LateDeductionRule.DoesNotExist:
+            raise Http404
 
     def get(self, request, pk):
         """ Retrieves a single rule (Detail Action). """
         rule = self.get_object(pk)
-        serializer = LateDeductionRuleSerializer(rule)
+        serializer = LateDeductionRuleSerializer(rule, context={'request': request})
         return Response(serializer.data)
 
     def put(self, request, pk):
         """ Updates an existing rule completely (Update Action). """
         rule = self.get_object(pk)
-        serializer = LateDeductionRuleSerializer(rule, data=request.data) 
+        serializer = LateDeductionRuleSerializer(rule, data=request.data, context={'request': request}) 
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -2852,13 +3459,20 @@ class LateDeductionRuleRetrieveUpdateDestroyAPIView(APIView):
 
 
 # --- Helper for Recalculation (APIView ke andar ya ek utility function) ---
-def _recalculate_fixed_tax(gender):
+def _recalculate_fixed_tax(gender, requesting_user):
     """ 
     Recalculates fixed tax (Cumulative Tax) for all rules of a given gender.
     Must be called AFTER all rules are saved in the database.
     """
     # Rules ko limit ke ascending order mein fetch karein
-    rules = TaxRule.objects.filter(gender=gender).order_by('total_income_limit')
+    from company.utils import filter_by_company
+    
+    rules = TaxRule.objects.filter(gender=gender)
+    
+    # ✅ MULTI-TENANCY: Filter tax rules by company
+    rules = filter_by_company(rules, requesting_user)
+    
+    rules = rules.order_by('total_income_limit')
     previous_limit = Decimal('0.00')
     
     for i, rule in enumerate(rules):
@@ -2866,11 +3480,11 @@ def _recalculate_fixed_tax(gender):
             # Last slab ka fixed tax 0 hota hai
             cumulative_fixed_tax = Decimal('0.00')
         else:
-            # Pichle rule se cumulative tax nikalna
+            # Pichla rule (i-1) ka final fixed tax uthaya
             if i == 0:
                 tax_on_previous_slabs = Decimal('0.00')
             else:
-                # Pichle rule (i-1) ka final fixed tax uthaya
+                # Pichla rule (i-1) ka final fixed tax uthaya
                 tax_on_previous_slabs = rules[i-1].taxable_amount_fixed
             
             # Current slab mein aayi income
@@ -2897,14 +3511,19 @@ class TaxRuleSetupAPIView(APIView):
 
     def get(self, request):
         """ Lists all Tax Rules, grouped by gender. """
+        from company.utils import filter_by_company
+        
         queryset = TaxRule.objects.all().order_by('gender', 'total_income_limit')
         
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         # Data ko Gender ke hisaab se group karna
         male_rules = queryset.filter(gender=GenderChoices.MALE)
         female_rules = queryset.filter(gender=GenderChoices.FEMALE)
         
-        male_serializer = TaxRuleSerializer(male_rules, many=True)
-        female_serializer = TaxRuleSerializer(female_rules, many=True)
+        male_serializer = TaxRuleSerializer(male_rules, many=True, context={'request': request})
+        female_serializer = TaxRuleSerializer(female_rules, many=True, context={'request': request})
         
         return Response({
             "male_rules": male_serializer.data,
@@ -2922,10 +3541,13 @@ class TaxRuleSetupAPIView(APIView):
             return Response({"error": "Expected a list of rules under the key 'rules'."}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
+            from company.utils import filter_by_company
             
-            # 1. 🛑 FORCE DELETE ALL EXISTING RULES 
-            # Saare purane rules ko hatana, taaki list mein jo nahi hain woh delete ho jaayen.
-            TaxRule.objects.all().delete() 
+            # 1. 🛑 DELETE ONLY COMPANY'S EXISTING RULES
+            # ✅ MULTI-TENANCY: Only delete rules from the same company
+            existing_rules = TaxRule.objects.all()
+            existing_rules = filter_by_company(existing_rules, request.user)
+            existing_rules.delete() 
             
             rules_to_save = []
             errors = []
@@ -2938,7 +3560,7 @@ class TaxRuleSetupAPIView(APIView):
                 item.pop('taxable_amount_fixed', None)
                 
                 # Ab hamesha Naya Serializer (Create) use hoga
-                serializer = TaxRuleSerializer(data=item) 
+                serializer = TaxRuleSerializer(data=item, context={'request': request}) 
 
                 if serializer.is_valid():
                     rules_to_save.append(serializer)
@@ -2954,8 +3576,8 @@ class TaxRuleSetupAPIView(APIView):
                 serializer.save()
             
             # 4. RECALCULATE FIXED TAX (Correct Ordering ke saath)
-            _recalculate_fixed_tax(GenderChoices.MALE)
-            _recalculate_fixed_tax(GenderChoices.FEMALE)
+            _recalculate_fixed_tax(GenderChoices.MALE, request.user)
+            _recalculate_fixed_tax(GenderChoices.FEMALE, request.user)
             
             # 5. Return Updated Data (GET call, jismein ab sirf naye rules honge)
             return self.get(request)
@@ -2978,16 +3600,27 @@ def _calculate_unpaid_days(employee, target_date):
     paid_days_count = Decimal('0.0')
     
     # 2. Fetch Static Paid Days Sources
-    weekly_holidays = set(
-        WeeklyHoliday.objects.filter(is_active=True).values_list('day', flat=True)
-    )
+    from company.utils import filter_by_company
+    
+    weekly_holidays_qs = WeeklyHoliday.objects.filter(is_active=True)
+    # ✅ MULTI-TENANCY: Filter weekly holidays by company
+    weekly_holidays_qs = filter_by_company(weekly_holidays_qs, employee)
+    weekly_holidays = set(weekly_holidays_qs.values_list('day', flat=True))
     
     # 3. Fetch Public Holidays
     public_holiday_dates = set()
+    
+    # ✅ MULTI-TENANCY: Filter public holidays through Holiday's parent field
+    # PublicHoliday -> Holiday -> parent (company owner)
+    from company.utils import get_company_owner
+    company_owner = get_company_owner(employee)
+    
     ph_queryset = PublicHoliday.objects.filter(
         start_date__lte=month_end_date,
-        end_date__gte=target_date
+        end_date__gte=target_date,
+        holiday__parent=company_owner  # Filter through Holiday's parent
     )
+    
     for ph in ph_queryset:
         day = ph.start_date
         while day <= ph.end_date:
@@ -3063,7 +3696,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
     permission_classes = [IsAuthenticated] 
     
     # --- TAX CALCULATION (Remains Unchanged) ---
-    def _calculate_monthly_tax(self, employee, taxable_income):
+    def _calculate_monthly_tax(self, employee, taxable_income, requesting_user):
         # ... (Your existing _calculate_monthly_tax logic here, unchanged) ...
         
         if taxable_income <= 0:
@@ -3073,11 +3706,15 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         gender = employee.profile.gender if employee.profile and employee.profile.gender else 'MALE'
         annual_taxable_income = taxable_income * Decimal('12.0')
         
-        # 2. Fetch Rules
-        tax_rules = TaxRule.objects.filter(
-            gender=gender, 
-            is_active=True
-        ).order_by('total_income_limit')
+        # 2. Fetch Tax Rules for the employee's gender
+        from company.utils import filter_by_company
+        
+        tax_rules = TaxRule.objects.filter(gender=gender)
+        
+        # ✅ MULTI-TENANCY: Filter tax rules by company
+        tax_rules = filter_by_company(tax_rules, requesting_user)
+        
+        tax_rules = tax_rules.order_by('total_income_limit')
 
         total_annual_tax = Decimal('0.00')
         previous_limit = Decimal('0.00')
@@ -3133,9 +3770,15 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
             employee=employee, attendance_date__year=year, attendance_date__month=month, is_late=True
         ).count()
         late_deduction_amount = Decimal('0.00')
-        late_rule = LateDeductionRule.objects.filter(
+        
+        # ✅ MULTI-TENANCY: Filter late deduction rules by company
+        from company.utils import filter_by_company
+        
+        late_rules = LateDeductionRule.objects.filter(
             late_days_threshold__lte=late_count 
-        ).order_by('-late_days_threshold').first()
+        )
+        late_rules = filter_by_company(late_rules, requesting_user)
+        late_rule = late_rules.order_by('-late_days_threshold').first()
         
         if late_rule:
             late_deduction_days = late_rule.deduction_days
@@ -3191,7 +3834,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
             deduction_details.append({'item_name': pg_deduction.deduction.deduction_name, 'amount': amount})
         
         # 3. TAX DEDUCTION (TDS)
-        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary) 
+        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary, requesting_user) 
         standard_deductions_sum += tax_amount
         if tax_amount > 0:
             deduction_details.append({'item_name': 'Income Tax (TDS)', 'amount': tax_amount})
@@ -3267,7 +3910,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
         allowance_details = [] # No allowances structure visible for HourlyPayGrade
 
         # TAX DEDUCTION (TDS) - based on gross salary
-        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary) 
+        tax_amount = self._calculate_monthly_tax(employee, final_gross_salary, requesting_user) 
         standard_deductions_sum += tax_amount
         if tax_amount > 0:
             deduction_details.append({'item_name': 'Income Tax (TDS)', 'amount': tax_amount})
@@ -3363,6 +4006,7 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
 
     def post(self, request):
         """ Triggers the payslip calculation and storage. """
+        from company.utils import filter_by_company
         
         employee_id = request.data.get('employee_id')
         month_str = request.data.get('month') 
@@ -3371,10 +4015,19 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
              return Response({"error": "Employee ID and Month (YYYY-MM) are required."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            employee = get_object_or_404(User, pk=employee_id)
+            # ✅ MULTI-TENANCY: Filter employee by company
+            employee_queryset = User.objects.filter(pk=employee_id)
+            employee_queryset = filter_by_company(employee_queryset, request.user)
+            employee = employee_queryset.first()
+            
+            if not employee:
+                return Response({"error": "Employee not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
+            
             target_date = datetime.strptime(month_str, '%Y-%m').date().replace(day=1)
-        except Exception:
-            return Response({"error": "Invalid employee ID or month format."}, status=status.HTTP_404_NOT_FOUND)
+        except ValueError:
+            return Response({"error": "Invalid month format. Use YYYY-MM."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"Invalid request: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             payslip_record = self._generate_payslip(employee, target_date, request.user)
@@ -3387,13 +4040,18 @@ class SinglePaySlipGenerateRetrieveAPIView(APIView):
 
     def get(self, request, pk):
         """ Retrieve a specific payslip by PK (Payslip ID). """
+        from company.utils import filter_by_employee_company
         
-        payslip = get_object_or_404(
-            PaySlip.objects.select_related(
-                'employee__profile__designation', 'employee__profile__department'
-            ).prefetch_related('details'),
-            pk=pk
-        )
+        # ✅ MULTI-TENANCY: Filter payslip by company through employee
+        payslip_queryset = PaySlip.objects.select_related(
+            'employee__profile__designation', 'employee__profile__department'
+        ).prefetch_related('details').filter(pk=pk)
+        
+        payslip_queryset = filter_by_employee_company(payslip_queryset, request.user, 'employee')
+        payslip = payslip_queryset.first()
+        
+        if not payslip:
+            return Response({"error": "Payslip not found or access denied."}, status=status.HTTP_404_NOT_FOUND)
         
         serializer = PaySlipDetailSerializer(payslip)
         return Response(serializer.data)
@@ -3403,6 +4061,7 @@ class MonthlySalarySheetView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from company.utils import filter_by_company
         
         filter_serializer = MonthlySalaryFilterSerializer(data=request.query_params)
         filter_serializer.is_valid(raise_exception=True)
@@ -3417,6 +4076,9 @@ class MonthlySalarySheetView(APIView):
             'profile'
         ).order_by('profile__first_name')
         
+        # Filter by company
+        employees_queryset = filter_by_company(employees_queryset, request.user)
+
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(employees_queryset, request, view=self)
         
@@ -3498,9 +4160,14 @@ class BulkPaySlipGenerateAPIView(APIView):
         target_date = validated_data['month']
         
         # Step 2: Build employee queryset based on filters
+        from company.utils import filter_by_company
+        
         queryset = User.objects.filter(
             profile__status='Active'  # Only active employees
         ).select_related('profile__monthly_pay_grade', 'profile__hourly_pay_grade', 'profile')
+        
+        # ✅ MULTI-TENANCY: Filter by company
+        queryset = filter_by_company(queryset, request.user)
         
         # Apply filters if provided
         if branch_id:
@@ -3533,6 +4200,7 @@ class BulkPaySlipGenerateAPIView(APIView):
         total_employees = len(employees)
         successful = 0
         failed = 0
+        success_list = []  # ✅ Track successful generations
         errors = []
         
         # Get reference to the salary generation logic
@@ -3543,21 +4211,33 @@ class BulkPaySlipGenerateAPIView(APIView):
                 # Reuse existing _generate_payslip method
                 payslip = single_payslip_view._generate_payslip(employee, target_date, request.user)
                 successful += 1
+                
+                # ✅ Add to success list with details
+                success_list.append({
+                    "employee_id": employee.id,
+                    "employee_name": employee.profile.full_name if hasattr(employee, 'profile') else employee.email,
+                    "employee_code": employee.profile.employee_id if hasattr(employee, 'profile') else None,
+                    "payslip_id": payslip.pk,
+                    "gross_salary": float(payslip.gross_salary),
+                    "net_salary": float(payslip.net_salary)
+                })
             except Exception as e:
                 failed += 1
                 errors.append({
                     "employee_id": employee.id,
                     "employee_name": employee.profile.full_name if hasattr(employee, 'profile') else employee.email,
+                    "employee_code": employee.profile.employee_id if hasattr(employee, 'profile') else None,
                     "error": str(e)
                 })
         
-        # Step 4: Return summary
+        # Step 4: Return detailed summary
         return Response({
             "message": f"Bulk generation completed. {successful} successful, {failed} failed.",
             "total_employees": total_employees,
             "successful": successful,
             "failed": failed,
-            "errors": errors
+            "success_details": success_list,  # ✅ Detailed success list
+            "errors": errors  # Detailed error list
         }, status=status.HTTP_200_OK)
 
 
@@ -3584,7 +4264,6 @@ class ChangePasswordView(APIView):
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
-
 
 
 
@@ -3658,11 +4337,33 @@ class CSVAttendanceUploadView(APIView):
                 punch_out_str = validated_data['punch_out_time']
                 
                 try:
+                    # ✅ MULTI-TENANCY: Lookup Profile by employee_id and filter by company
+                    from company.utils import get_company_users
+                    
+                    # Get all users in the requesting user's company
+                    company_users = get_company_users(request.user)
+                    
                     # Lookup Profile by the string employee_id (Fingerprint/Emp No.)
-                    employee_profile = Profile.objects.select_related('user', 'work_shift').get(employee_id=emp_id_str)
+                    employee_profile = Profile.objects.select_related('user', 'work_shift').filter(
+                        employee_id=emp_id_str,
+                        user__in=company_users  # ✅ Filter by company
+                    ).first()
+                    
+                    if not employee_profile:
+                        failed_records.append({
+                            "row": row_number, 
+                            "employee_id": emp_id_str, 
+                            "error": "Employee ID not found or does not belong to your company."
+                        })
+                        continue
+                    
                     employee = employee_profile.user
-                except Profile.DoesNotExist:
-                    failed_records.append({"row": row_number, "employee_id": emp_id_str, "error": "Employee ID (fingerprint number) not found."})
+                except Exception as e:
+                    failed_records.append({
+                        "row": row_number, 
+                        "employee_id": emp_id_str, 
+                        "error": f"Error looking up employee: {str(e)}"
+                    })
                     continue
                 
                 
@@ -3756,13 +4457,17 @@ class RoleListView(APIView):
 
     # --- GET: List all Roles ---
     def get(self, request, format=None):
+        from company.utils import filter_by_company
+        
         roles = Role.objects.all().order_by('name')
-        serializer = RoleSerializer(roles, many=True)
+        # ✅ MULTI-TENANCY: Filter roles by company
+        roles = filter_by_company(roles, request.user)
+        serializer = RoleSerializer(roles, many=True, context={'request': request})
         return Response(serializer.data)
 
     # --- POST: Create a new Role ---
     def post(self, request, format=None):
-        serializer = RoleSerializer(data=request.data)
+        serializer = RoleSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             # Role ko save karo
             serializer.save()
@@ -3780,30 +4485,39 @@ class RoleDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     # Helper function to get the object, returns 404 if not found
-    def get_object(self, pk):
+    def get_object(self, pk, user):
+        from company.utils import filter_by_company
+        
         try:
-            return Role.objects.get(pk=pk)
+            # ✅ MULTI-TENANCY: Filter role by company
+            roles = Role.objects.filter(pk=pk)
+            roles = filter_by_company(roles, user)
+            role = roles.first()
+            
+            if not role:
+                raise Role.DoesNotExist
+            return role
         except Role.DoesNotExist:
             return Response({"detail": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
 
     # --- GET: Retrieve Role Detail ---
     def get(self, request, pk, format=None):
-        role = self.get_object(pk)
+        role = self.get_object(pk, request.user)
         # Check if the helper returned an error response
         if isinstance(role, Response):
             return role
             
-        serializer = RoleSerializer(role)
+        serializer = RoleSerializer(role, context={'request': request})
         return Response(serializer.data)
 
     # --- PUT/PATCH: Update Role ---
     def put(self, request, pk, format=None):
-        role = self.get_object(pk)
+        role = self.get_object(pk, request.user)
         if isinstance(role, Response):
             return role
             
         # partial=True for PATCH requests, but PUT typically uses full update
-        serializer = RoleSerializer(role, data=request.data, partial=True) 
+        serializer = RoleSerializer(role, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -3812,7 +4526,7 @@ class RoleDetailView(APIView):
 
     # --- DELETE: Delete Role ---
     def delete(self, request, pk, format=None):
-        role = self.get_object(pk)
+        role = self.get_object(pk, request.user)
         if isinstance(role, Response):
             return role
             
@@ -3826,7 +4540,7 @@ class AutomaticAttendanceView(APIView):
     """
     Endpoint for automatic attendance recording via face recognition.
     """
-    permission_classes = [] 
+    permission_classes = [IsAuthenticated]
     authentication_classes = [] 
     # Threshold for matching faces (Lower value means stricter match)
     MATCH_THRESHOLD = 0.6 
@@ -3870,7 +4584,15 @@ class AutomaticAttendanceView(APIView):
             live_encoding = live_encodings[0]
 
             # --- Database Matching ---
-            potential_matches = Profile.objects.filter(face_encoding__isnull=False, user__is_active=True).select_related('user', 'work_shift')
+            # ✅ MULTI-TENANCY: Filter by company (since endpoint is now authenticated)
+            from company.utils import get_company_users
+            
+            company_users = get_company_users(request.user)
+            potential_matches = Profile.objects.filter(
+                face_encoding__isnull=False,
+                user__is_active=True,
+                user__in=company_users  # ✅ Only company employees
+            ).select_related('user', 'work_shift')
             known_encodings = []
             profiles_map = {} 
             for profile in potential_matches:
@@ -4027,8 +4749,13 @@ class BonusSettingListCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        from company.utils import filter_by_company
+        
         queryset = BonusSetting.objects.all().order_by('festival_name')
         
+        # Filter by company
+        queryset = filter_by_company(queryset, request.user)
+
         # Search filter
         search_query = request.query_params.get('search', None)
         if search_query:
@@ -4039,12 +4766,12 @@ class BonusSettingListCreateView(APIView):
         # Pagination
         paginator = StandardResultsSetPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        serializer = BonusSettingSerializer(page, many=True)
+        serializer = BonusSettingSerializer(page, many=True, context={'request': request})
         
         return paginator.get_paginated_response(serializer.data)
     
     def post(self, request):
-        serializer = BonusSettingSerializer(data=request.data)
+        serializer = BonusSettingSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -4058,19 +4785,27 @@ class BonusSettingDetailView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self, pk):
+        from company.utils import filter_by_company
+        
         try:
-            return BonusSetting.objects.get(pk=pk)
+            bonus_settings = BonusSetting.objects.filter(pk=pk)
+            bonus_settings = filter_by_company(bonus_settings, self.request.user)
+            bonus_setting = bonus_settings.first()
+            
+            if not bonus_setting:
+                raise Http404
+            return bonus_setting
         except BonusSetting.DoesNotExist:
             raise Http404
     
     def get(self, request, pk):
         bonus_setting = self.get_object(pk)
-        serializer = BonusSettingSerializer(bonus_setting)
+        serializer = BonusSettingSerializer(bonus_setting, context={'request': request})
         return Response(serializer.data)
     
     def put(self, request, pk):
         bonus_setting = self.get_object(pk)
-        serializer = BonusSettingSerializer(bonus_setting, data=request.data)
+        serializer = BonusSettingSerializer(bonus_setting, data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -4078,7 +4813,7 @@ class BonusSettingDetailView(APIView):
     
     def patch(self, request, pk):
         bonus_setting = self.get_object(pk)
-        serializer = BonusSettingSerializer(bonus_setting, data=request.data, partial=True)
+        serializer = BonusSettingSerializer(bonus_setting, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -4121,11 +4856,16 @@ class GenerateBonusView(APIView):
         designation_id = validated_data.get('designation_id')
         
         # Step 2: Get bonus setting
-        try:
-            bonus_setting = BonusSetting.objects.get(id=bonus_setting_id, is_active=True)
-        except BonusSetting.DoesNotExist:
+        # ✅ MULTI-TENANCY: Filter bonus setting by company
+        from company.utils import filter_by_company
+        
+        bonus_settings = BonusSetting.objects.filter(id=bonus_setting_id, is_active=True)
+        bonus_settings = filter_by_company(bonus_settings, request.user)
+        bonus_setting = bonus_settings.first()
+        
+        if not bonus_setting:
             return Response(
-                {"error": "Bonus setting not found or inactive."},
+                {"error": "Bonus setting not found, inactive, or does not belong to your company."},
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -4133,6 +4873,9 @@ class GenerateBonusView(APIView):
         queryset = User.objects.filter(
             profile__status='Active'
         ).select_related('profile__monthly_pay_grade', 'profile')
+        
+        # ✅ MULTI-TENANCY: Filter employees by company
+        queryset = filter_by_company(queryset, request.user)
         
         # Apply filters
         if branch_id:
@@ -4223,10 +4966,15 @@ class EmployeeBonusListView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
+        from company.utils import filter_by_employee_company
+        
         queryset = EmployeeBonus.objects.select_related(
             'employee__profile__department',
             'bonus_setting'
         ).all().order_by('-bonus_month', '-created_at')
+        
+        # ✅ MULTI-TENANCY: Filter by company through employee
+        queryset = filter_by_employee_company(queryset, request.user, 'employee')
         
         # Filters
         festival_name = request.query_params.get('festival_name', None)
@@ -4315,12 +5063,17 @@ class MarkPaymentPaidView(APIView):
     
     def _mark_salary_paid(self, payslip_ids, payment_method, payment_reference, payment_date, user, export_csv=False):
         """Mark payslips as paid and optionally generate CSV"""
+        from company.utils import filter_by_employee_company
+        
         payslips = PaySlip.objects.filter(id__in=payslip_ids).select_related(
             'employee__profile',
             'employee__profile__department',
             'employee__profile__designation',
             'employee__profile__branch'
         ).prefetch_related('employee__profile__account_details')
+        
+        # ✅ MULTI-TENANCY: Filter payslips by company
+        payslips = filter_by_employee_company(payslips, user, 'employee')
         
         if not payslips.exists():
             return Response(
@@ -4373,12 +5126,17 @@ class MarkPaymentPaidView(APIView):
     
     def _mark_bonus_paid(self, bonus_ids, payment_method, payment_reference, payment_date, user, export_csv=False):
         """Mark bonuses as paid and optionally generate CSV"""
+        from company.utils import filter_by_employee_company
+        
         bonuses = EmployeeBonus.objects.filter(id__in=bonus_ids).select_related(
             'employee__profile',
             'employee__profile__department',
             'employee__profile__designation',
             'employee__profile__branch'
         ).prefetch_related('employee__profile__account_details')
+        
+        # ✅ MULTI-TENANCY: Filter bonuses by company
+        bonuses = filter_by_employee_company(bonuses, user, 'employee')
         
         if not bonuses.exists():
             return Response(
@@ -4492,7 +5250,7 @@ class MarkPaymentPaidView(APIView):
         # CSV Headers
         writer.writerow([
             'Employee ID', 'Employee Name', 'Email', 'Department', 'Designation', 'Branch',
-            'Bonus Month', 'Bonus Amount', 'Bonus Type', 'Payment Status', 'Payment Date', 
+            'Bonus Month', 'Bonus Amount', 'Festival Name', 'Payment Status', 'Payment Date', 
             'Payment Method', 'Payment Reference', 'Account Holder Name', 'Bank Name', 
             'Account Number', 'IFSC Code', 'Branch Name', 'Account Type'
         ])
@@ -4515,7 +5273,7 @@ class MarkPaymentPaidView(APIView):
                 profile.branch.name if profile.branch else 'N/A',
                 bonus.bonus_month.strftime('%Y-%m'),
                 bonus.bonus_amount,
-                bonus.bonus_type or 'N/A',
+                bonus.festival_name or 'N/A',  # Fixed: Use festival_name instead of bonus_type
                 bonus.status,
                 bonus.payment_date.strftime('%Y-%m-%d') if bonus.payment_date else 'N/A',
                 bonus.payment_method or 'N/A',

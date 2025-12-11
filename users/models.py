@@ -39,9 +39,24 @@ class Role(models.Model):
     Holds dynamic roles that can be created by the Admin from the frontend.
     It links to a Django Group for robust permission management.
     """
-    name = models.CharField(max_length=50, unique=True, verbose_name="Role Name")
+    name = models.CharField(max_length=50, verbose_name="Role Name")
     description = models.TextField(blank=True)
-    
+    parent = models.ForeignKey(
+        'User',
+        on_delete=models.CASCADE,
+        related_name='roles_created',
+        null=True,
+        blank=True,
+        help_text="Company owner who owns this role (not necessarily who created it)"
+    )
+    created_by = models.ForeignKey(
+        'User', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='roles_defined'
+    )
+
     # Linking to Django's native permission Group for granular access control
     group = models.OneToOneField(
         Group, 
@@ -62,12 +77,19 @@ class Role(models.Model):
     class Meta:
         verbose_name = "Dynamic Role"
         verbose_name_plural = "Dynamic Roles"
+        unique_together = ('parent', 'name')
         ordering = ['name']
 
     def save(self, *args, **kwargs):
-        # Ensure a corresponding Django Group exists when a Role is created/saved
+        """
+        ✅ MULTI-TENANCY: Create unique Group per company
+        Group name format: Role_{parent_id}_{role_name}
+        """
         if not self.group:
-            group, created = Group.objects.get_or_create(name=f"Role_{self.name}")
+            # Include parent ID to make group name unique per company
+            parent_id = self.parent.id if self.parent else 'global'
+            group_name = f"Role_{parent_id}_{self.name}"
+            group, created = Group.objects.get_or_create(name=group_name)
             self.group = group
         super().save(*args, **kwargs)
 
@@ -80,6 +102,15 @@ class User(AbstractUser):
     username = None  # remove username field
     email = models.EmailField(unique=True)
     
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='employees',
+        help_text="Company owner for this user. NULL for company owners and superusers."
+    )
+
     role = models.ForeignKey(
         Role, 
         on_delete=models.SET_NULL,
@@ -116,7 +147,37 @@ class User(AbstractUser):
         # Super Admin logic (Tier 1)
         if self.is_superuser:
             self.is_staff = True # Superuser should always have staff access
+    @property
+    def company_owner(self):
+        """
+        Get the company owner for this user.
         
+        Returns:
+            - self if user is company owner (parent=None and not superuser)
+            - parent if user is employee (parent is set)
+            - None if user is superuser
+        
+        Why needed:
+            When Admin creates employee/role, we need to know which company owner
+            to assign. This property finds the owner regardless of who is logged in.
+        
+        Example:
+            # Company owner
+            owner.company_owner  # Returns owner itself
+            
+            # Admin employee
+            admin.company_owner  # Returns owner (admin.parent)
+            
+            # Manager employee
+            manager.company_owner  # Returns owner (manager.parent)
+        """
+        if self.parent is None and not self.is_superuser:
+            return self  # User IS the company owner
+        elif self.parent:
+            return self.parent  # User is employee, return their owner
+        return None  # Superuser has no company
+
+
     @property
     def accessible_pages(self):
         """
@@ -141,6 +202,14 @@ class User(AbstractUser):
 
 class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    parent = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='employee_profiles',
+        null=True,
+        blank=True,
+        help_text="Company owner (same as user.parent)"
+    )
     
     # --- Shared Personal Information Fields ---
     first_name = models.CharField(max_length=100, null=True, blank=True)
@@ -212,6 +281,13 @@ class Education(models.Model):
     result = models.CharField(max_length=50, null=True, blank=True)
     gpa = models.FloatField(verbose_name="GPA / CGPA", null=True, blank=True)
     passing_year = models.PositiveIntegerField()
+    created_by = models.ForeignKey(
+        'User', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='education_created'
+    )
 
     def __str__(self):
         return f"{self.degree} from {self.institute}"
@@ -224,6 +300,13 @@ class Experience(models.Model):
     duration = models.CharField(max_length=100)
     skill = models.TextField(null=True, blank=True)
     responsibility = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        'User', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='experience_created'
+    )
 
     def __str__(self):
         return f"{self.designation} at {self.organization}"
@@ -247,13 +330,18 @@ class AccountDetails(models.Model):
     branch_name = models.CharField(max_length=255)
     account_type = models.CharField(max_length=10, choices=ACCOUNT_TYPE_CHOICES, default='Savings')
     is_primary = models.BooleanField(default=False, help_text="Primary account for salary payment")
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(
+        'User', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='account_details_created'
+    )
 
     class Meta:
         verbose_name = "Account Detail"
         verbose_name_plural = "Account Details"
-        ordering = ['-is_primary', '-created_at']
+        ordering = ['-is_primary']
 
     def __str__(self):
         return f"{self.account_holder_name} - {self.bank_name} ({self.account_number[-4:]})"

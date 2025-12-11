@@ -144,9 +144,15 @@ class PageSerializer(serializers.ModelSerializer):
 class RoleSerializer(serializers.ModelSerializer):
     pages = serializers.SerializerMethodField()
 
+    users_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Role
-        fields = ['id', 'name', 'description', 'pages']
+        fields = ['id', 'name', 'description', 'pages', 'parent', 'users_count']
+        read_only_fields = ['id', 'parent', 'users_count']
+
+    def get_users_count(self, obj):
+        return obj.users.count()
 
     def get_pages(self, obj):
         pages = obj.pages.all().order_by('module_order','module','order','name')
@@ -207,6 +213,53 @@ class RoleSerializer(serializers.ModelSerializer):
             result.append(meta)
 
         return result
+
+    def validate_name(self, value):
+        """
+        ✅ MULTI-TENANCY: Check role name uniqueness within company only
+        """
+        user = self.context['request'].user
+        
+        # Determine company owner
+        if user.parent is None and not user.is_superuser:
+            company_owner = user
+        elif user.parent:
+            company_owner = user.parent
+        else:
+            company_owner = None
+
+        # Check uniqueness
+        if self.instance:
+            if Role.objects.filter(parent=company_owner, name__iexact=value).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError(f"Role '{value}' already exists in your company")
+        else:
+            if Role.objects.filter(parent=company_owner, name__iexact=value).exists():
+                raise serializers.ValidationError(f"Role '{value}' already exists in your company")
+        
+        return value
+    
+    def create(self, validated_data):
+        """
+        ✅ MULTI-TENANCY: Auto-set parent to company owner and created_by
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required to create role")
+        
+        user = request.user
+        
+        # Determine company owner
+        if user.parent is None and not user.is_superuser:
+            company_owner = user
+        elif user.parent:
+            company_owner = user.parent
+        else:
+            company_owner = None
+            
+        validated_data['parent'] = company_owner
+        validated_data['created_by'] = user  # ✅ Set created_by for filter_by_company
+        
+        return super().create(validated_data)
 
         
 # --- 4C: Page Assignment Serializer (For POST/PATCH Input) ---

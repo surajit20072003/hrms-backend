@@ -283,3 +283,229 @@ def deserialize_face_encoding(encoding_list):
     if not encoding_list or not isinstance(encoding_list, list): return None
     try: return np.array(encoding_list)
     except: return None
+
+
+
+
+
+def get_company_owner(user):
+    """
+    ✅ MULTI-TENANCY: Get the company owner for any user.
+    
+    This is the CORE function that determines which company a user belongs to.
+    
+    Args:
+        user: User object (can be superuser, company owner, or employee)
+    
+    Returns:
+        User object (company owner) or None
+    
+    Why needed:
+        When an Admin employee creates another employee or role, we need to know
+        which company owner to assign. This function finds that owner.
+    
+    Example:
+        # Company owner creates employee
+        owner = request.user  # parent=None
+        get_company_owner(owner)  # Returns owner itself
+        
+        # Admin employee creates employee
+        admin = request.user  # parent=5 (owner's id)
+        get_company_owner(admin)  # Returns admin.parent (owner)
+        
+        # Result: All employees have parent=owner_id (not admin_id)
+    """
+    if user.is_superuser:
+        return None  # Superuser has no company
+    
+    if user.parent is None:
+        return user  # User IS the company owner
+    
+    return user.parent  # User is employee, return their owner
+def get_company_users(user):
+    """
+    ✅ MULTI-TENANCY: Get all users in the same company (owner + employees).
+    
+    Args:
+        user: Current user object
+    
+    Returns:
+        QuerySet of User objects in the same company
+    
+    Why needed:
+        To filter data like departments, roles, etc. that were created
+        by anyone in the same company.
+    """
+    from django.db.models import Q
+    User = get_user_model()
+    
+    if user.is_superuser:
+        return User.objects.all()
+    
+    company_owner = get_company_owner(user)
+    
+    if company_owner:
+        return User.objects.filter(
+            Q(id=company_owner.id) | Q(parent=company_owner)
+        )
+    
+    return User.objects.filter(id=user.id)
+def get_company_employees(user):
+    """
+    ✅ MULTI-TENANCY: Get all employees in same company (excluding owner).
+    
+    Args:
+        user: Current user object
+    
+    Returns:
+        QuerySet of User objects (employees only, no owner)
+    
+    Why needed:
+        For employee list views where we don't want to show the owner.
+    """
+    User = get_user_model()
+    
+    if user.is_superuser:
+        return User.objects.filter(parent__isnull=False)
+    
+    company_owner = get_company_owner(user)
+    
+    if company_owner:
+        return User.objects.filter(parent=company_owner)
+    
+    return User.objects.none()
+def filter_by_company(queryset, user):
+    """
+    ✅ MULTI-TENANCY: Filter any queryset by company based on parent field.
+    
+    This is the MAIN filtering function used in all list views.
+    
+    Args:
+        queryset: Django queryset to filter
+        user: Current user making the request
+    
+    Returns:
+        Filtered queryset showing only company-specific data
+    
+    Usage in views:
+        departments = Department.objects.all()
+        departments = filter_by_company(departments, request.user)
+    
+    Why needed:
+        Company A should not see Company B's departments, designations, etc.
+    """
+    if user.is_superuser:
+        return queryset
+    
+    company_owner = get_company_owner(user)
+    
+    if company_owner:
+        return queryset.filter(parent=company_owner)
+    
+    return queryset.none()
+
+def filter_by_employee_company(queryset, user, employee_field='employee'):
+    """
+    ✅ MULTI-TENANCY: Filter queryset by company through employee relationship.
+    
+    Use this for models that don't have direct 'parent' field but are linked
+    to employees (Warning, Termination, Promotion, LeaveApplication, etc.)
+    
+    Args:
+        queryset: Django queryset to filter
+        user: Current user making the request
+        employee_field: Name of the employee ForeignKey field (default: 'employee')
+    
+    Returns:
+        Filtered queryset showing only company-specific data (including owner)
+    
+    Usage in views:
+        # For Warning model (warning_to field)
+        warnings = filter_by_employee_company(Warning.objects.all(), request.user, 'warning_to')
+        
+        # For Termination model (terminate_to field)
+        terminations = filter_by_employee_company(Termination.objects.all(), request.user, 'terminate_to')
+        
+        # For Promotion model (employee field)
+        promotions = filter_by_employee_company(Promotion.objects.all(), request.user, 'employee')
+        
+        # For LeaveApplication model (employee field)
+        leaves = filter_by_employee_company(LeaveApplication.objects.all(), request.user, 'employee')
+    """
+    from django.db.models import Q
+    
+    if user.is_superuser:
+        return queryset
+    
+    company_owner = get_company_owner(user)
+    
+    if company_owner:
+        # Include both owner and employees
+        # Owner: employee__id = company_owner.id
+        # Employees: employee__parent = company_owner
+        owner_filter = {f'{employee_field}__id': company_owner.id}
+        employee_filter = {f'{employee_field}__parent': company_owner}
+        
+        return queryset.filter(
+            Q(**owner_filter) | Q(**employee_filter)
+        )
+    
+    return queryset.none()
+def can_create_roles(user):
+    """
+    ✅ MULTI-TENANCY: Check if user can create roles.
+    
+    Permission granted if:
+    - User is superuser, OR
+    - User is company owner, OR
+    - User has "Manage Roles" page access (allows Admin/Manager to create roles)
+    
+    Args:
+        user: User object
+    
+    Returns:
+        Boolean - True if user can create roles
+    
+    Why page-based:
+        Company owner can give Admin the permission to manage roles by
+        assigning the "Manage Roles" page to Admin role.
+    
+    Example:
+        # Company owner - always can create
+        can_create_roles(owner)  # True
+        
+        # Admin with "manage_roles" page - can create
+        admin_role.pages.add(manage_roles_page)
+        can_create_roles(admin)  # True
+        
+        # Employee without page - cannot create
+        can_create_roles(employee)  # False
+    """
+    if user.is_superuser:
+        return True
+    
+    if user.parent is None:  # Company owner
+        return True
+    
+    # ✅ PAGE-BASED PERMISSION: Check if user has "Manage Roles" page access
+    if user.role:
+        # You can use any page codename you want
+        # Examples: 'manage_roles', 'create_role', 'role_management'
+        has_role_page = user.role.pages.filter(
+            codename__in=['manage_roles', 'create_role', 'role_management']
+        ).exists()
+        if has_role_page:
+            return True
+    
+    return False
+def is_company_owner(user):
+    """
+    ✅ MULTI-TENANCY: Check if user is a company owner.
+    
+    Args:
+        user: User object
+    
+    Returns:
+        Boolean - True if user is company owner
+    """
+    return user.parent is None and not user.is_superuser

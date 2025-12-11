@@ -51,6 +51,92 @@ class RegisterView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
+# ============================================================================
+# NEW: Superadmin Create Company Owner View
+# ============================================================================
+class SuperadminCreateCompanyOwnerView(APIView):
+    """
+    POST /api/superadmin/create-company-owner/
+    
+    Sirf Superadmin hi company owners create kar sakta hai.
+    Company owner ko email aur temporary password milega.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # 1. Verify ki request superadmin se aa rahi hai
+        if not request.user.is_superuser:
+            return Response(
+                {"error": "Only superadmin can create company owners."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # 2. Required fields validate karein
+        email = request.data.get('email')
+        password = request.data.get('password')  # Temporary password
+        first_name = request.data.get('first_name', '')
+        last_name = request.data.get('last_name', '')
+        company_name = request.data.get('company_name', '')
+        
+        if not email or not password:
+            return Response(
+                {"error": "Email and password are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 3. Check karein ki email already exist to nahi karta
+        if User.objects.filter(email=email).exists():
+            return Response(
+                {"error": "User with this email already exists."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            with transaction.atomic():
+                # 4. Company Owner create karein
+                user = User.objects.create(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    parent=None,  # Company owner ka parent None hota hai
+                    is_active=True,
+                    is_staff=False,
+                    is_superuser=False
+                )
+                user.set_password(password)
+                user.save()
+                
+                # 5. Profile create karein
+                from company.models import Profile
+                Profile.objects.create(
+                    user=user,
+                    first_name=first_name,
+                    last_name=last_name,
+                    company_name=company_name
+                )
+                
+                # 6. Response prepare karein with credentials
+                return Response(
+                    {
+                        "message": "Company owner created successfully.",
+                        "credentials": {
+                            "email": email,
+                            "password": password,  # Temporary password
+                            "user_id": user.id,
+                            "company_name": company_name
+                        },
+                        "note": "Please share these credentials securely with the company owner. They should change the password after first login."
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+                
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to create company owner: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -202,9 +288,12 @@ class RoleListView(APIView):
     ]
     
     def get(self, request):
-        roles = Role.objects.all()
-        # FIX: RoleListSerializer is now used for simple list display
-        serializer = RoleSerializer(roles, many=True) 
+        from company.utils import filter_by_company
+        
+        roles = Role.objects.all().order_by('name')
+        # ✅ MULTI-TENANCY: Filter roles by company
+        roles = filter_by_company(roles, request.user)
+        serializer = RoleSerializer(roles, many=True, context={'request': request}) 
         return Response(serializer.data)
 
 
@@ -220,8 +309,16 @@ class RolePageAssignmentView(APIView):
 
     def get(self, request, role_id):
         """ Returns a list of Page IDs currently assigned to the Role. """
+        from company.utils import filter_by_company
+        
         try:
-            role = Role.objects.get(pk=role_id)
+            # ✅ MULTI-TENANCY: Verify role belongs to company
+            roles = Role.objects.filter(pk=role_id)
+            roles = filter_by_company(roles, request.user)
+            role = roles.first()
+            
+            if not role:
+                raise Role.DoesNotExist
         except Role.DoesNotExist:
             return Response({"error": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -236,9 +333,16 @@ class RolePageAssignmentView(APIView):
 
     def post(self, request, role_id):
         """ Replaces the existing page assignments with a new list of Page IDs. """
+        from company.utils import filter_by_company
         
         try:
-            role = Role.objects.get(pk=role_id)
+            # ✅ MULTI-TENANCY: Verify role belongs to company
+            roles = Role.objects.filter(pk=role_id)
+            roles = filter_by_company(roles, request.user)
+            role = roles.first()
+            
+            if not role:
+                raise Role.DoesNotExist
         except Role.DoesNotExist:
             return Response({"error": "Role not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -281,8 +385,11 @@ class UserRoleUpdateView(APIView):
     ]
     
     def patch(self, request, user_id):
-        # 1. Target User ko fetch karein
-        user_to_update = get_object_or_404(User, pk=user_id)
+        from company.utils import filter_by_company, get_company_users
+        
+        # 1. ✅ MULTI-TENANCY: Verify user belongs to company
+        company_users = get_company_users(request.user)
+        user_to_update = get_object_or_404(company_users, pk=user_id)
         
         # 2. Check karein ki role_id request data mein hai ya nahi
         role_id = request.data.get('role_id')
@@ -290,10 +397,14 @@ class UserRoleUpdateView(APIView):
             return Response({"error": "role_id is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # 3. Role object ko fetch karein
+            # 3. ✅ MULTI-TENANCY: Verify role belongs to company
             if role_id:
-                # Agar role_id diya gaya hai, toh Role object dhundho
-                role = Role.objects.get(pk=role_id)
+                roles = Role.objects.filter(pk=role_id)
+                roles = filter_by_company(roles, request.user)
+                role = roles.first()
+                
+                if not role:
+                    raise Role.DoesNotExist
             else:
                 # Agar role_id 0 ya None hai, toh role ko None set karein
                 role = None 

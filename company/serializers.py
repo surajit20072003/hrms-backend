@@ -22,7 +22,15 @@ from django.core.files.base import ContentFile
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Department
-        fields = '__all__' 
+        fields = '__all__'
+        read_only_fields = ['parent', 'created_by']
+    
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data) 
 
 class DesignationSerializer(serializers.ModelSerializer):
     # Response me department ka naam bhi dikhayenge
@@ -32,30 +40,82 @@ class DesignationSerializer(serializers.ModelSerializer):
         model = Designation
         # 'id' aur 'name' read/write hain, 'department' sirf write ke liye hai
         fields = ['id', 'name', 'department', 'department_name']
+        read_only_fields = ['parent', 'created_by']  # Added parent
         extra_kwargs = {
             'department': {'write_only': True}
         }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company
+            
+            # Filter department choices by company
+            self.fields['department'].queryset = filter_by_company(
+                Department.objects.all(),
+                request.user
+            )
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 class BranchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
         fields = '__all__'
+        read_only_fields = ['parent', 'created_by']  # Added parent
 
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 class EducationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Education
-        fields = ['id', 'institute', 'degree', 'board', 'result', 'gpa', 'passing_year']
+        fields = ['id', 'institute', 'degree', 'board', 'result', 'gpa', 'passing_year', 'created_by']
+        # ACTION: Add 'created_by' to read_only_fields
+        read_only_fields = ['id', 'created_by'] 
+
+    # ACTION: Add create method to set 'created_by'
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 class ExperienceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Experience
-        fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility']
+        fields = ['id', 'organization', 'designation', 'duration', 'skill', 'responsibility', 'created_by']
+        # ACTION: Add 'created_by' to read_only_fields
+        read_only_fields = ['id', 'created_by']
         
+    # ACTION: Add create method to set 'created_by'
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
 class AccountDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = AccountDetails
-        fields = ['id', 'account_holder_name', 'bank_name', 'account_number', 'ifsc_code', 'branch_name', 'account_type', 'is_primary']
+        fields = [
+            'id', 'account_holder_name', 'bank_name', 'account_number', 
+            'ifsc_code', 'branch_name', 'account_type', 'is_primary', 
+            'created_by' # ACTION: Added to fields
+        ]
+        # ACTION: Add 'created_by' to read_only_fields
+        read_only_fields = ['id', 'created_by']
 
+    # ACTION: Add create method to set 'created_by'
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 class EmployeeCreateSerializer(serializers.ModelSerializer):
     """
@@ -89,6 +149,56 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
             'face_image_base64', # Base64 input
             'photo' # Django FileField input (Form Data)
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company, get_company_owner
+            
+            # Role filtering (special case - uses parent field)
+            company_owner = get_company_owner(request.user)
+            if company_owner:
+                self.fields['role'].queryset = Role.objects.filter(parent=company_owner)
+            else:
+                # Superuser case
+                self.fields['role'].queryset = Role.objects.all()
+            
+            # Department filtering
+            self.fields['department'].queryset = filter_by_company(
+                Department.objects.all(),
+                request.user
+            )
+            
+            # Designation filtering
+            self.fields['designation'].queryset = filter_by_company(
+                Designation.objects.all(),
+                request.user
+            )
+            
+            # Branch filtering
+            self.fields['branch'].queryset = filter_by_company(
+                Branch.objects.all(),
+                request.user
+            )
+            
+            # WorkShift filtering
+            self.fields['work_shift'].queryset = filter_by_company(
+                WorkShift.objects.all(),
+                request.user
+            )
+            
+            # Pay Grade filtering
+            self.fields['monthly_pay_grade'].queryset = filter_by_company(
+                MonthlyPayGrade.objects.all(),
+                request.user
+            )
+            
+            self.fields['hourly_pay_grade'].queryset = filter_by_company(
+                HourlyPayGrade.objects.all(),
+                request.user
+            )
 
     def validate(self, data):
         # ... (Existing validation logic for Email Uniqueness and Pay Grade) ...
@@ -193,17 +303,32 @@ class EmployeeCreateSerializer(serializers.ModelSerializer):
             # Agar koi bhi photo input nahi tha, toh encoding field null rahega (optional enrollment)
             validated_data['face_encoding'] = None
         
-        # Step 3: Create User
+        # Step 3: Create User with parent field
+        # ✅ MULTI-TENANCY: Set parent to company owner
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            # Determine company owner
+            if request.user.parent is None and not request.user.is_superuser:
+                company_owner = request.user
+            elif request.user.parent:
+                company_owner = request.user.parent
+            else:
+                company_owner = None
+        else:
+            company_owner = None
+        
         user_fields = {
             'email': email,
             'password': password,
             'role': role_instance,
             'first_name': validated_data.get('first_name', ''),
             'last_name': validated_data.get('last_name', ''),
+            'parent': company_owner,  # ✅ Set parent for multi-tenancy
         }
         user_obj = User.objects.create_user(**user_fields)
         
-        # Step 4: Create Profile
+        # Step 4: Create Profile with parent field
+        validated_data['parent'] = company_owner  # ✅ Set parent on Profile too
         profile = Profile.objects.create(user=user_obj, **validated_data)
         
         return profile
@@ -292,10 +417,35 @@ class EmployeeDetailSerializer(serializers.ModelSerializer):
     hourly_pay_grade_rate = serializers.CharField(source='hourly_pay_grade.hourly_rate', read_only=True)
 
 
+    # User ID field for response
+    user_id = serializers.IntegerField(source='user.id', read_only=True)
+
     class Meta:
         model = Profile
         exclude = ['user']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
         
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company, get_company_owner
+            
+            # Role filtering
+            company_owner = get_company_owner(request.user)
+            if company_owner:
+                self.fields['role_id'].queryset = Role.objects.filter(parent=company_owner)
+            
+            # WorkShift, Department, Designation, Branch filtering
+            self.fields['work_shift'].queryset = filter_by_company(
+                WorkShift.objects.all(), request.user
+            )
+            self.fields['monthly_pay_grade'].queryset = filter_by_company(
+                MonthlyPayGrade.objects.all(), request.user
+            )
+            self.fields['hourly_pay_grade'].queryset = filter_by_company(
+                HourlyPayGrade.objects.all(), request.user
+            )
 
     def update(self, instance, validated_data):
     
@@ -346,6 +496,26 @@ class WarningSerializer(serializers.ModelSerializer):
             'warning_to': {'write_only': True},
             'warning_by': {'write_only': True},
         }
+        read_only_fields = ['created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_employees, get_company_users
+            
+            # warning_to: Only employees (not owner)
+            company_employees = get_company_employees(request.user)
+            self.fields['warning_to'].queryset = company_employees
+            
+            # warning_by: All users (owner + employees)
+            company_users = get_company_users(request.user)
+            self.fields['warning_by'].queryset = company_users
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 class TerminationSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source='terminate_to.profile.full_name', read_only=True, allow_null=True)
     terminated_by_name = serializers.CharField(source='terminate_by.profile.full_name', read_only=True, allow_null=True)
@@ -368,6 +538,27 @@ class TerminationSerializer(serializers.ModelSerializer):
             'terminate_to': {'write_only': True},
             'terminate_by': {'write_only': True},
         }
+        read_only_fields = ['created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_employees, get_company_users
+            
+            # terminate_to: Only employees (not owner)
+            company_employees = get_company_employees(request.user)
+            self.fields['terminate_to'].queryset = company_employees
+            
+            # terminate_by: All users (owner + employees)
+            company_users = get_company_users(request.user)
+            self.fields['terminate_by'].queryset = company_users
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+        
 class PromotionSerializer(serializers.ModelSerializer):
     # For displaying names and other details in GET requests (read-only)
     employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True, allow_null=True)
@@ -399,6 +590,78 @@ class PromotionSerializer(serializers.ModelSerializer):
             'promoted_department': {'write_only': True},
             'promoted_designation': {'write_only': True},
         }
+        read_only_fields = ['created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_employees, filter_by_company
+            
+            # Filter employee choices
+            self.fields['employee'].queryset = get_company_employees(request.user)
+            
+            # Filter department choices
+            self.fields['promoted_department'].queryset = filter_by_company(
+                Department.objects.all(),
+                request.user
+            )
+            
+            # Filter designation choices
+            self.fields['promoted_designation'].queryset = filter_by_company(
+                Designation.objects.all(),
+                request.user
+            )
+
+    def create(self, validated_data):
+        from django.db import transaction
+        
+        validated_data['created_by'] = self.context['request'].user
+        
+        # Create promotion record with transaction
+        with transaction.atomic():
+            # Save promotion
+            promotion = super().create(validated_data)
+            
+            # ✅ AUTO-UPDATE: Update employee's profile with promoted details
+            employee = promotion.employee
+            profile = employee.profile
+            
+            # Update department and designation
+            if promotion.promoted_department:
+                profile.department = promotion.promoted_department
+            
+            if promotion.promoted_designation:
+                profile.designation = promotion.promoted_designation
+            
+            # ✅ UPDATE PAY GRADE: Try to match promoted_pay_grade text with actual pay grade
+            if promotion.promoted_pay_grade:
+                pay_grade_name = promotion.promoted_pay_grade.strip()
+                
+                # Try to find in MonthlyPayGrade first
+                monthly_grade = MonthlyPayGrade.objects.filter(
+                    grade_name__iexact=pay_grade_name,
+                    parent=employee.company_owner  # Company-specific
+                ).first()
+                
+                if monthly_grade:
+                    profile.monthly_pay_grade = monthly_grade
+                    profile.hourly_pay_grade = None  # Clear hourly if setting monthly
+                else:
+                    # Try HourlyPayGrade
+                    hourly_grade = HourlyPayGrade.objects.filter(
+                        pay_grade_name__iexact=pay_grade_name,
+                        parent=employee.company_owner  # Company-specific
+                    ).first()
+                    
+                    if hourly_grade:
+                        profile.hourly_pay_grade = hourly_grade
+                        profile.monthly_pay_grade = None  # Clear monthly if setting hourly
+            
+            profile.save()
+            
+            return promotion
 
 
 
@@ -416,6 +679,14 @@ class HolidaySerializer(serializers.ModelSerializer):
     class Meta:
         model = Holiday
         fields = '__all__'
+        read_only_fields = ['parent', 'created_by']  # Added parent
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 class PublicHolidaySerializer(serializers.ModelSerializer):
     """ Serializer for assigning dates to a holiday. """
@@ -429,24 +700,86 @@ class PublicHolidaySerializer(serializers.ModelSerializer):
             # For creation (POST), we only need the holiday ID
             'holiday': {'write_only': True}
         }
+        read_only_fields = ['created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company
+            
+            # Filter holiday choices by company
+            self.fields['holiday'].queryset = filter_by_company(
+                Holiday.objects.all(),
+                request.user
+            )
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 class WeeklyHolidaySerializer(serializers.ModelSerializer):
     """ Serializer for weekly holidays. """
     class Meta:
         model = WeeklyHoliday
         fields = '__all__'
+        read_only_fields = ['parent', 'created_by']  # Added parent
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 class LeaveTypeSerializer(serializers.ModelSerializer):
     """ Serializer for different types of leave. """
     class Meta:
         model = LeaveType
         fields = '__all__'
+        read_only_fields = ['parent', 'created_by']  # Added parent
+
+    def create(self, validated_data):
+        from company.utils import get_company_users
+        
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        new_leave_type = super().create(validated_data)
+        
+        # ✅ MULTI-TENANCY: Get only users from the same company
+        if request:
+            company_users = get_company_users(request.user)
+            all_users = company_users.filter(is_active=True)
+            
+            # Create LeaveBalance for each company user
+            for user in all_users:
+                if not LeaveBalance.objects.filter(employee=user, leave_type=new_leave_type).exists():
+                    LeaveBalance.objects.create(
+                        employee=user,
+                        leave_type=new_leave_type,
+                        entitlement=new_leave_type.number_of_days,
+                        available_balance=new_leave_type.number_of_days,  # ✅ Fixed: Set available balance
+                        created_by=request.user
+                    )
+        
+        return new_leave_type
 
 class EarnLeaveRuleSerializer(serializers.ModelSerializer):
     """ Serializer for the earn leave configuration rule. """
     class Meta:
         model = EarnLeaveRule
         fields = '__all__'
+        read_only_fields = ['parent', 'created_by', 'for_month']  # ✅ for_month is fixed at 1
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
     number_of_days = serializers.FloatField(read_only=True)
@@ -460,6 +793,19 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
             'purpose',
             'number_of_days'
         ]
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company
+            
+            # Filter leave type choices by company
+            self.fields['leave_type'].queryset = filter_by_company(
+                LeaveType.objects.all(),
+                request.user
+            )
 
     def validate(self, data):
         employee = self.context['request'].user
@@ -503,7 +849,8 @@ class LeaveApplicationCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         return LeaveApplication.objects.create(
             **validated_data,
-            status=LeaveStatus.PENDING
+            status=LeaveStatus.PENDING,
+            created_by=self.context['request'].user
         )
 
 
@@ -552,7 +899,16 @@ class WorkShiftSerializer(serializers.ModelSerializer):
     """Serializer for creating, listing, and updating work shifts."""
     class Meta:
         model = WorkShift
-        fields = ['id', 'shift_name', 'start_time', 'end_time', 'late_count_time','ot_start_delay_minutes']
+        fields = ['id', 'shift_name', 'start_time', 'end_time', 'late_count_time','ot_start_delay_minutes', 'parent']
+        read_only_fields = ['parent', 'created_by']  # Added parent
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            # Automatically parent set karo
+            validated_data['parent'] = request.user.company_owner
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
     def validate(self, data):
         start_time = data.get('start_time')
@@ -646,9 +1002,16 @@ class AllowanceSerializer(serializers.ModelSerializer):
         model = Allowance
         fields = [
             'id', 'allowance_name', 'allowance_type', 'allowance_type_display',
-            'percentage_of_basic', 'limit_per_month', 'created_at', 'updated_at'
+            'percentage_of_basic', 'limit_per_month', 'parent', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'parent', 'created_at', 'updated_at', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            validated_data['parent'] = request.user.company_owner
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
     def validate(self, data):
         """
@@ -683,9 +1046,16 @@ class DeductionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'deduction_name', 'deduction_type', 'deduction_type_display',
             'percentage_of_basic', 'limit_per_month', 'is_tax_exempt',
-            'created_at', 'updated_at'
+            'parent', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'parent', 'created_at', 'updated_at', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            validated_data['parent'] = request.user.company_owner
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
     def validate(self, data):
         """Custom validation for percentage field."""
@@ -751,13 +1121,73 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
             'allowances_to_add', 'deductions_to_add'
         ]
         # Gross aur Net salary ab calculated aur stored hain.
-        read_only_fields = ['id', 'gross_salary', 'net_salary'] 
+        read_only_fields = ['id', 'gross_salary', 'net_salary', 'parent', 'created_by'] 
         # NOTE: basic_salary ab input field hai, read_only nahi.
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company
+            
+            # Note: allowances_to_add and deductions_to_add are ListFields, not PrimaryKeyRelatedFields
+            # So we can't set queryset on them. Validation will happen in _create_update_m2m method
+            # where we filter by company when fetching Allowance/Deduction objects
+
+
+    def validate(self, data):
+        """Validate that allowances and deductions belong to the same company."""
+        from company.utils import filter_by_company, get_company_owner
+        
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return data
+        
+        company_owner = get_company_owner(request.user)
+        
+        # Validate allowances
+        allowances_to_add = data.get('allowances_to_add', [])
+        if allowances_to_add:
+            for item in allowances_to_add:
+                allowance_id = item.get('allowance')
+                if allowance_id:
+                    # Check if allowance exists and belongs to the same company
+                    allowance_queryset = Allowance.objects.filter(pk=allowance_id)
+                    allowance_queryset = filter_by_company(allowance_queryset, request.user)
+                    
+                    if not allowance_queryset.exists():
+                        raise serializers.ValidationError({
+                            "allowances_to_add": f"Allowance with ID {allowance_id} does not exist or does not belong to your company."
+                        })
+        
+        # Validate deductions
+        deductions_to_add = data.get('deductions_to_add', [])
+        if deductions_to_add:
+            for item in deductions_to_add:
+                deduction_id = item.get('deduction')
+                if deduction_id:
+                    # Check if deduction exists and belongs to the same company
+                    deduction_queryset = Deduction.objects.filter(pk=deduction_id)
+                    deduction_queryset = filter_by_company(deduction_queryset, request.user)
+                    
+                    if not deduction_queryset.exists():
+                        raise serializers.ValidationError({
+                            "deductions_to_add": f"Deduction with ID {deduction_id} does not exist or does not belong to your company."
+                        })
+        
+        return data
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
     # --- Calculation Core Logic (Pichle response se) ---
     def calculate_salaries(self, instance, basic_salary_input):
-        # ... (Calculation logic, jismein basic, allowance, deduction, aur limits ka use hota hai) ...
-        # [Use the exact code block for calculate_salaries from the previous response]
+
         
         basic = basic_salary_input
         total_allowance = Decimal('0.00')
@@ -797,6 +1227,8 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
 
     # --- Helper function for M2M creation/update (Fixed logic) ---
     def _create_update_m2m(self, pay_grade_instance, allowances_data, deductions_data, is_update=False):
+        from company.utils import filter_by_company
+        request = self.context.get('request')
         
         # 1. Handle Allowances
         if allowances_data is not None:
@@ -808,12 +1240,19 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                 if 'allowance' not in item or not item['allowance']:
                     continue
                     
-                # Item['allowance'] is the ID here, fetch the object
+                # Item['allowance'] is the ID here, fetch the object with company filtering
                 try:
-                    allowance_obj = Allowance.objects.get(pk=item['allowance'])
+                    allowance_queryset = Allowance.objects.filter(pk=item['allowance'])
+                    # Filter by company
+                    if request and request.user.is_authenticated:
+                        allowance_queryset = filter_by_company(allowance_queryset, request.user)
+                    allowance_obj = allowance_queryset.first()
+                    
+                    if not allowance_obj:
+                        raise Allowance.DoesNotExist
                 except Allowance.DoesNotExist:
                     raise serializers.ValidationError(
-                        {"allowances_to_add": f"Allowance ID {item['allowance']} not found."}
+                        {"allowances_to_add": f"Allowance ID {item['allowance']} not found or not accessible."}
                     )
                 
                 # Logic: Fetch the default value from the Allowance object
@@ -825,7 +1264,8 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                 PayGradeAllowance.objects.create(
                     pay_grade=pay_grade_instance, 
                     allowance=allowance_obj, 
-                    value=default_value # Inject the default value
+                    value=default_value, # Inject the default value
+                    created_by=request.user if request else None
                 )
 
         
@@ -837,10 +1277,17 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                 if 'deduction' not in item or not item['deduction']:
                     continue
                 try:
-                    deduction_obj = Deduction.objects.get(pk=item['deduction'])
+                    deduction_queryset = Deduction.objects.filter(pk=item['deduction'])
+                    # Filter by company
+                    if request and request.user.is_authenticated:
+                        deduction_queryset = filter_by_company(deduction_queryset, request.user)
+                    deduction_obj = deduction_queryset.first()
+                    
+                    if not deduction_obj:
+                        raise Deduction.DoesNotExist
                 except Deduction.DoesNotExist:
                     raise serializers.ValidationError(
-                        {"deductions_to_add": f"Deduction ID {item['deduction']} not found."}
+                        {"deductions_to_add": f"Deduction ID {item['deduction']} not found or not accessible."}
                     )
                 
                 # Logic: Fetch the default value from the Deduction object
@@ -852,7 +1299,8 @@ class MonthlyPayGradeSerializer(serializers.ModelSerializer):
                 PayGradeDeduction.objects.create(
                     pay_grade=pay_grade_instance, 
                     deduction=deduction_obj, 
-                    value=default_value # Inject the default value
+                    value=default_value, # Inject the default value
+                    created_by=request.user if request else None
                 )
     @transaction.atomic
     def save(self, **kwargs):
@@ -889,7 +1337,14 @@ class HourlyPayGradeSerializer(serializers.ModelSerializer):
     class Meta:
         model = HourlyPayGrade
         fields = ['id', 'pay_grade_name', 'hourly_rate', 'is_active']
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'parent', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 
 
@@ -900,7 +1355,14 @@ class PerformanceCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PerformanceCategory
         fields = ['id', 'category_name', 'is_active', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'parent', 'created_at', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        # Automatically parent set karo
+        validated_data['parent'] = request.user.company_owner
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 
 class PerformanceCriteriaSerializer(serializers.ModelSerializer):
@@ -914,7 +1376,25 @@ class PerformanceCriteriaSerializer(serializers.ModelSerializer):
             'id', 'category', 'category_name', 'criteria_name', 
             'is_active', 'created_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'created_by']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import filter_by_company
+            
+            # Filter category choices by company
+            self.fields['category'].queryset = filter_by_company(
+                PerformanceCategory.objects.all(),
+                request.user
+            )
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        return super().create(validated_data)
 
 class PerformanceRatingSerializer(serializers.ModelSerializer):
     """Handles the detail (criteria ID and rating value)."""
@@ -924,6 +1404,26 @@ class PerformanceRatingSerializer(serializers.ModelSerializer):
     class Meta:
         model = PerformanceRating
         fields = ['criteria', 'criteria_name', 'rating_value']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_owner
+            
+            # Filter criteria by company through category's parent
+            if not request.user.is_superuser:
+                company_owner = get_company_owner(request.user)
+                if company_owner:
+                    self.fields['criteria'].queryset = PerformanceCriteria.objects.filter(
+                        category__parent=company_owner
+                    )
+                else:
+                    self.fields['criteria'].queryset = PerformanceCriteria.objects.none()
+            # Superuser can see all criteria
+            else:
+                self.fields['criteria'].queryset = PerformanceCriteria.objects.all()
 
 
 class EmployeePerformanceSerializer(serializers.ModelSerializer):
@@ -934,7 +1434,7 @@ class EmployeePerformanceSerializer(serializers.ModelSerializer):
     ratings = PerformanceRatingSerializer( many=True, read_only=True)
     
     # Read-only fields to display employee and reviewer names
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
     reviewer_name = serializers.CharField(source='reviewed_by.username', read_only=True)
 
     class Meta:
@@ -945,13 +1445,57 @@ class EmployeePerformanceSerializer(serializers.ModelSerializer):
             'ratings', 'ratings_to_add'
         ]
         read_only_fields = ['id', 'overall_rating', 'reviewed_by', 'created_at']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_users
+            
+            # Filter employee choices by company (User objects)
+            company_users = get_company_users(request.user)
+            self.fields['employee'].queryset = company_users
+    
+    def validate_ratings_to_add(self, value):
+        """Validate that all criteria belong to the user's company."""
+        from company.utils import get_company_owner
+        
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required.")
+        
+        if request.user.is_superuser:
+            return value  # Superuser can use any criteria
+        
+        company_owner = get_company_owner(request.user)
+        if not company_owner:
+            raise serializers.ValidationError("Company owner not found.")
+        
+        # Validate each criteria
+        for rating_item in value:
+            criteria_id = rating_item.get('criteria')
+            if criteria_id:
+                try:
+                    criteria = PerformanceCriteria.objects.select_related('category').get(pk=criteria_id.id if hasattr(criteria_id, 'id') else criteria_id)
+                    
+                    # Check if criteria's category belongs to the same company
+                    if criteria.category.parent != company_owner:
+                        raise serializers.ValidationError(
+                            f"Criteria '{criteria.criteria_name}' does not belong to your company."
+                        )
+                except PerformanceCriteria.DoesNotExist:
+                    raise serializers.ValidationError(f"Criteria with ID {criteria_id} does not exist.")
+        
+        return value
 
     # --- CREATE Method (Nested Saving Logic) ---
     def create(self, validated_data):
         ratings_data = validated_data.pop('ratings_to_add')
         
-        # Current user ko 'reviewed_by' set karein
+        # Current user ko 'reviewed_by' and 'created_by' set karein
         validated_data['reviewed_by'] = self.context['request'].user
+        validated_data['created_by'] = self.context['request'].user
         
         # 1. EmployeePerformance (Header) instance create karein
         performance_review = EmployeePerformance.objects.create(**validated_data)
@@ -962,7 +1506,8 @@ class EmployeePerformanceSerializer(serializers.ModelSerializer):
         for rating_item in ratings_data:
             ratings_list.append(
                 PerformanceRating(
-                    performance_review=performance_review, 
+                    performance_review=performance_review,
+                    created_by=self.context['request'].user,
                     **rating_item
                 )
             )
@@ -978,7 +1523,6 @@ class EmployeePerformanceSerializer(serializers.ModelSerializer):
             
         return performance_review
 
-    # --- UPDATE Method (Nested Update Logic - Full replacement) ---
     def update(self, instance, validated_data):
         ratings_data = validated_data.pop('ratings_to_add', None)
         
@@ -994,7 +1538,8 @@ class EmployeePerformanceSerializer(serializers.ModelSerializer):
             for rating_item in ratings_data:
                 ratings_list.append(
                     PerformanceRating(
-                        performance_review=instance, 
+                        performance_review=instance,
+                        created_by=self.context['request'].user,
                         **rating_item
                     )
                 )
@@ -1015,7 +1560,7 @@ class PerformanceSummarySerializer(serializers.ModelSerializer):
     Serializer to display simple summary data for the Performance Summary Report.
     """
     # Employee name property se
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
     ratings_detail = serializers.SerializerMethodField()
     
     class Meta:
@@ -1048,7 +1593,7 @@ class JobPostSerializer(serializers.ModelSerializer):
     Serializer for Job Post CRUD operations.
     """
     # 'published_by' field ko read-only rakhte hain, aur yeh field current user se set hoga
-    published_by_name = serializers.CharField(source='published_by.full_name', read_only=True)
+    published_by_name = serializers.CharField(source='published_by.profile.full_name', read_only=True)
     
     class Meta:
         model = JobPost
@@ -1057,7 +1602,13 @@ class JobPostSerializer(serializers.ModelSerializer):
             'status', 'job_publish_date', 'application_end_date',
             'published_by', 'published_by_name', 'created_at'
         ]
-        read_only_fields = ['id', 'published_by', 'published_by_name', 'created_at']
+        read_only_fields = ['id', 'published_by', 'published_by_name', 'created_at', 'created_by', 'parent']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
 
 
 class TrainingTypeSerializer(serializers.ModelSerializer):
@@ -1069,7 +1620,13 @@ class TrainingTypeSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrainingType
         fields = ['id', 'training_type_name', 'status', 'status_display', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'created_by', 'parent']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
 
 
 class EmployeeTrainingSerializer(serializers.ModelSerializer):
@@ -1078,7 +1635,7 @@ class EmployeeTrainingSerializer(serializers.ModelSerializer):
     Handles nested reading of FK names and file uploads.
     """
     
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
 
     training_type_name = serializers.CharField(source='training_type.training_type_name', read_only=True)
     
@@ -1091,14 +1648,34 @@ class EmployeeTrainingSerializer(serializers.ModelSerializer):
             'subject', 'from_date', 'to_date', 'description', 
             'certificate_file', 'created_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_users, filter_by_company
+            
+            # Filter employee choices by company (User objects)
+            self.fields['employee'].queryset = get_company_users(request.user)
+            
+            # Filter training type choices by company
+            self.fields['training_type'].queryset = filter_by_company(
+                TrainingType.objects.all(),
+                request.user
+            )
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 
 class AwardSerializer(serializers.ModelSerializer):
     """
     Serializer for Award CRUD operations using Enum for Award Name.
     """
-    employee_name = serializers.CharField(source='employee.full_name', read_only=True)
+    employee_name = serializers.CharField(source='employee.profile.full_name', read_only=True)
     display_award_name = serializers.CharField(source='get_award_name_display', read_only=True)
     display_month = serializers.SerializerMethodField(read_only=True)
 
@@ -1110,7 +1687,21 @@ class AwardSerializer(serializers.ModelSerializer):
             'employee', 'award_month', 'gift_item',
             'employee_name', 'display_award_name', 'display_month'
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'created_by']
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get('request')
+        
+        if request and request.user.is_authenticated:
+            from company.utils import get_company_users
+            
+            # Filter employee choices by company (User objects)
+            self.fields['employee'].queryset = get_company_users(request.user)
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
     def get_display_month(self, obj):
         # Date ko Month YYYY format mein convert karna
@@ -1134,7 +1725,13 @@ class NoticeSerializer(serializers.ModelSerializer):
             'attach_file', 
             'created_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
 
 
 class LateDeductionRuleSerializer(serializers.ModelSerializer):
@@ -1150,7 +1747,13 @@ class LateDeductionRuleSerializer(serializers.ModelSerializer):
             'deduction_days',      
             'status'               # 'status' field ab seedhe model se aata hai
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
 
 
 
@@ -1171,7 +1774,13 @@ class TaxRuleSerializer(serializers.ModelSerializer):
             'taxable_amount_fixed', # Is field ko PUT/POST mein allow karein (ya ignore)
             'is_active',
         ]
-        read_only_fields = ['id', 'taxable_amount_fixed'] # Read-only for safety
+        read_only_fields = ['id', 'taxable_amount_fixed', 'created_by'] # Read-only for safety
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
 
     # Custom create/update methods ki ab zaroorat nahi hai.
 
@@ -1345,17 +1954,57 @@ class RoleSerializer(serializers.ModelSerializer):
     """ Serializer for creating, listing, and managing Role objects. """
     class Meta:
         model = Role
-        fields = ['id', 'name', 'description']
-        read_only_fields = ['id'] 
+        fields = ['id', 'name', 'description', 'parent']
+        read_only_fields = ['id', 'parent']
+    
+    def create(self, validated_data):
+        """
+        ✅ MULTI-TENANCY: Auto-set parent and created_by for role
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            raise serializers.ValidationError("Authentication required to create role")
+        
+        user = request.user
+        
+        # Determine company owner
+        if user.parent is None and not user.is_superuser:
+            company_owner = user
+        elif user.parent:
+            company_owner = user.parent
+        else:
+            company_owner = None
+            
+        validated_data['parent'] = company_owner
+        validated_data['created_by'] = user  # ✅ Set created_by for filter_by_company
+        
+        return super().create(validated_data) 
 
     def validate_name(self, value):
-        """ Role name should be unique (case-insensitive). """
-        queryset = Role.objects.all()
+        """
+        ✅ MULTI-TENANCY: Role name should be unique within company only.
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return value
+        
+        user = request.user
+        
+        # Determine company owner
+        if user.parent is None and not user.is_superuser:
+            company_owner = user
+        elif user.parent:
+            company_owner = user.parent
+        else:
+            company_owner = None
+        
+        # Check uniqueness within company
+        queryset = Role.objects.filter(parent=company_owner)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
             
         if queryset.filter(name__iexact=value).exists():
-            raise serializers.ValidationError({"name": "A role with this name already exists."})
+            raise serializers.ValidationError(f"Role '{value}' already exists in your company")
             
         return value
     
@@ -1409,7 +2058,13 @@ class BonusSettingSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['created_by'] = request.user
+        validated_data['parent'] = request.user.company_owner
+        return super().create(validated_data)
     
     def validate_percentage_of_basic(self, value):
         """Ensure percentage is between 0 and 100"""
@@ -1443,7 +2098,11 @@ class EmployeeBonusSerializer(serializers.ModelSerializer):
             'status',
             'created_at'
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'created_by']
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
 
 class GenerateBonusFilterSerializer(serializers.Serializer):
     """Filter serializer for bulk bonus generation"""
