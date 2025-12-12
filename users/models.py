@@ -178,6 +178,7 @@ class User(AbstractUser):
         return None  # Superuser has no company
 
 
+
     @property
     def accessible_pages(self):
         """
@@ -190,6 +191,99 @@ class User(AbstractUser):
             return self.role.pages.all()
         return Page.objects.none()
     
+    # ============================================================================
+    # SUBSCRIPTION-BASED ACCESS METHODS
+    # ============================================================================
+    
+    def get_subscription_plan(self):
+        """
+        Get user's subscription plan (owner) or parent's plan (employee).
+        
+        Returns:
+            SubscriptionPlan object or None
+        
+        Example:
+            # Company owner
+            owner.get_subscription_plan()  # Returns owner's subscribed plan
+            
+            # Employee
+            employee.get_subscription_plan()  # Returns parent's (owner's) plan
+            
+            # Superuser
+            superuser.get_subscription_plan()  # Returns None (unlimited access)
+        """
+        if self.is_superuser:
+            return None  # Superuser has no plan restrictions
+        
+        # Get company owner (self if owner, parent if employee)
+        owner = self.company_owner
+        
+        # Check if owner has subscription
+        if owner and hasattr(owner, 'subscription'):
+            return owner.subscription.plan
+        
+        return None  # No subscription found
+    
+    def accessible_pages_by_plan(self):
+        """
+        Returns pages accessible based on subscription plan + role.
+        
+        Logic:
+        1. Superuser → All pages
+        2. Company Owner → All pages from subscribed plan
+        3. Employee → Intersection of (plan pages AND role pages)
+        
+        Returns:
+            QuerySet of Page objects
+        
+        Example:
+            # Owner with Basic plan (5 pages)
+            owner.accessible_pages_by_plan()  # Returns 5 pages
+            
+            # Employee with Admin role (3 pages assigned)
+            # Company plan has 5 pages
+            employee.accessible_pages_by_plan()  # Returns 3 pages (role pages that are in plan)
+            
+            # Employee role has Premium page but company has Basic plan
+            employee.accessible_pages_by_plan()  # Premium page NOT included
+        """
+        if self.is_superuser:
+            return Page.objects.all()
+        
+        # Get subscription plan
+        plan = self.get_subscription_plan()
+        
+        if not plan:
+            return Page.objects.none()  # No plan = no access
+        
+        # Get plan's available pages
+        plan_pages = plan.available_pages.all()
+        
+        # If user is company owner, return all plan pages
+        if self.parent is None:
+            return plan_pages
+        
+        # If employee with role, return intersection of role pages and plan pages
+        if self.role:
+            role_pages = self.role.pages.all()
+            # Return pages that are in BOTH role AND plan
+            return plan_pages & role_pages
+        
+        return Page.objects.none()
+    
+    @property
+    def has_active_subscription(self):
+        """
+        Check if user (or their company owner) has an active subscription.
+        
+        Returns:
+            Boolean
+        """
+        owner = self.company_owner
+        if owner and hasattr(owner, 'subscription'):
+            return owner.subscription.is_active
+        return False
+    
     @property
     def is_super_admin(self):
         # Tier 1: Highest access
@@ -198,6 +292,7 @@ class User(AbstractUser):
     @property
     def is_primary_admin(self):
         return self.is_staff and self.role and self.role.name == "Admin"
+
 
 
 class Profile(models.Model):
@@ -220,6 +315,7 @@ class Profile(models.Model):
     gender = models.CharField(max_length=10, null=True, blank=True)
     religion = models.CharField(max_length=50, null=True, blank=True)
     marital_status = models.CharField(max_length=20, null=True, blank=True)
+    company_name = models.CharField(max_length=200, null=True, blank=True, help_text="Company name (for company owners)")
     face_encoding = models.JSONField(
         null=True, 
         blank=True, 
@@ -345,3 +441,203 @@ class AccountDetails(models.Model):
 
     def __str__(self):
         return f"{self.account_holder_name} - {self.bank_name} ({self.account_number[-4:]})"
+
+
+# ============================================================================
+# SUBSCRIPTION PLAN MODELS (For Multi-Tenancy with Plan-Based Access)
+# ============================================================================
+
+class SubscriptionPlan(models.Model):
+    """
+    Defines subscription plans (Free, Basic, Premium) that company owners can subscribe to.
+    Each plan has different pricing, employee limits, and page access.
+    """
+    
+    BILLING_CYCLE_CHOICES = [
+        ('MONTHLY', 'Monthly'),
+        ('YEARLY', 'Yearly'),
+    ]
+
+    PLAN_NAME_CHOICES = [
+        ('Free', 'Free'),
+        ('Basic', 'Basic'),
+        ('Premium', 'Premium'),
+        ('Enterprise', 'Enterprise'),
+    ]
+    
+    # Basic Details
+    plan_name = models.CharField(
+        max_length=50, 
+        unique=True,
+        choices=PLAN_NAME_CHOICES,
+        verbose_name="Plan Name",
+        help_text="Select one of the predefined plan types"
+    )
+    description = models.TextField(
+        verbose_name="Plan Description",
+        help_text="Brief description of what this plan offers"
+    )
+    
+    # Pricing
+    price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        verbose_name="Price",
+        help_text="Monthly price in USD/INR"
+    )
+    
+    # Limits
+    max_employees = models.PositiveIntegerField(
+        null=True, 
+        blank=True,
+        verbose_name="Max Employees",
+        help_text="Maximum number of employees allowed. Leave blank for unlimited."
+    )
+    
+    # Features - Pages available in this plan
+    available_pages = models.ManyToManyField(
+        Page, 
+        related_name='subscription_plans',
+        blank=True,
+        verbose_name="Available Pages/Features",
+        help_text="Pages that users on this plan can access"
+    )
+    
+    # Billing Configuration
+    billing_cycle = models.CharField(
+        max_length=10, 
+        choices=BILLING_CYCLE_CHOICES, 
+        default='MONTHLY',
+        verbose_name="Billing Cycle"
+    )
+    
+    # Status
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="Active Status",
+        help_text="Only active plans can be subscribed to"
+    )
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Subscription Plan"
+        verbose_name_plural = "Subscription Plans"
+        ordering = ['price']  # Order by price (Free -> Premium)
+    
+    def __str__(self):
+        return f"{self.plan_name} (${self.price}/{self.billing_cycle})"
+    
+    @property
+    def features_count(self):
+        """Returns the number of pages/features in this plan"""
+        return self.available_pages.count()
+    
+    @property
+    def is_unlimited_employees(self):
+        """Check if plan has unlimited employee limit"""
+        return self.max_employees is None
+
+
+class UserSubscription(models.Model):
+    """
+    Tracks which plan a company owner has subscribed to.
+    One subscription per company owner (OneToOne relationship).
+    """
+    
+    SUBSCRIPTION_STATUS = [
+        ('ACTIVE', 'Active'),
+        ('EXPIRED', 'Expired'),
+        ('CANCELLED', 'Cancelled'),
+        ('TRIAL', 'Trial'),
+    ]
+    
+    # Link to Company Owner (parent user)
+    user = models.OneToOneField(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='subscription',
+        help_text="Company owner who subscribed to this plan"
+    )
+    
+    # Subscribed Plan
+    plan = models.ForeignKey(
+        SubscriptionPlan, 
+        on_delete=models.PROTECT,  # Prevent plan deletion if subscriptions exist
+        related_name='subscriptions',
+        verbose_name="Subscription Plan"
+    )
+    
+    # Subscription Dates
+    start_date = models.DateField(
+        auto_now_add=True,
+        verbose_name="Subscription Start Date"
+    )
+    end_date = models.DateField(
+        null=True, 
+        blank=True,
+        verbose_name="Subscription End Date",
+        help_text="Leave blank for lifetime/no expiry. Set for trial periods."
+    )
+    
+    # Status
+    status = models.CharField(
+        max_length=10, 
+        choices=SUBSCRIPTION_STATUS, 
+        default='ACTIVE',
+        verbose_name="Subscription Status"
+    )
+    
+    # Payment Tracking (for future Razorpay integration)
+    last_payment_date = models.DateField(
+        null=True, 
+        blank=True,
+        verbose_name="Last Payment Date"
+    )
+    next_billing_date = models.DateField(
+        null=True, 
+        blank=True,
+        verbose_name="Next Billing Date"
+    )
+    
+    # Razorpay fields (for future use)
+    razorpay_subscription_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name="Razorpay Subscription ID"
+    )
+    razorpay_customer_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name="Razorpay Customer ID"
+    )
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "User Subscription"
+        verbose_name_plural = "User Subscriptions"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.plan.plan_name} ({self.status})"
+    
+    @property
+    def is_active(self):
+        """Check if subscription is currently active"""
+        return self.status == 'ACTIVE'
+    
+    @property
+    def days_remaining(self):
+        """Calculate days remaining in subscription (if end_date exists)"""
+        if self.end_date:
+            from datetime import date
+            delta = self.end_date - date.today()
+            return max(0, delta.days)
+        return None  # Unlimited/No expiry

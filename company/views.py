@@ -333,6 +333,32 @@ class EmployeeCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        # ✅ MULTI-TENANCY: Check Employee Limit based on Subscription Plan
+        if not request.user.is_superuser:
+            from users.models import User
+            
+            # Get company owner
+            company_owner = request.user.company_owner
+            
+            if company_owner:
+                # Get subscription plan
+                plan = company_owner.get_subscription_plan()
+                
+                if plan and not plan.is_unlimited_employees:
+                    # Count current employees (excluding owner)
+                    current_count = User.objects.filter(parent=company_owner).count()
+                    
+                    if current_count >= plan.max_employees:
+                        return Response(
+                            {
+                                "error": "Employee limit reached for your current plan.",
+                                "limit": plan.max_employees,
+                                "current_count": current_count,
+                                "upgrade_required": True
+                            },
+                            status=status.HTTP_403_FORBIDDEN
+                        )
+
         serializer = EmployeeCreateSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
